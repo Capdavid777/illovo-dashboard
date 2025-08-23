@@ -1,0 +1,19 @@
+generator client { provider = "prisma-client-js" }
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model DailyMetric {
+  id            Int      @id @default(autoincrement())
+  date          DateTime @unique
+  revenue       Int
+  targetRevenue Int
+  occupancy     Float
+  arr           Int
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
