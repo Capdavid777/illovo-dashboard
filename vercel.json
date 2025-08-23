@@ -1,4 +1,4 @@
 {
-  "buildCommand": "npx prisma generate --schema=./prisma/schema.prisma && npx prisma migrate deploy --schema=./prisma/schema.prisma && next build",
-  "installCommand": "npm ci"
+  "installCommand": "npm install",
+  "buildCommand": "npx prisma generate && npx prisma migrate deploy && next build"
 }
