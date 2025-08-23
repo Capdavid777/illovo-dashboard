@@ -1,22 +1,24 @@
-﻿import { useEffect, useState } from 'react';
+﻿'use client';
 
-export async function getServerSideProps() {
-  // prevent static pre-render at build
-  return { props: {} };
+import React, { useEffect, useState } from 'react';
+
+// helper: format YYYY-MM-DD for <input type="date">
+function isoDate(d = new Date()) {
+  const tzOff = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tzOff * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
 export default function AdminPage() {
+  const [date, setDate] = useState(isoDate());
+  const [revenue, setRevenue] = useState('');
+  const [target, setTarget] = useState('');
+  const [occupancy, setOccupancy] = useState('');
+  const [arr, setArr] = useState('');
+  const [notes, setNotes] = useState('');
+
   const [items, setItems] = useState([]);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    revenue: '',
-    target: '',
-    occupancy: '',
-    arr: '',
-    notes: '',
-  });
 
   const load = async () => {
     setError('');
@@ -24,94 +26,320 @@ export default function AdminPage() {
       const r = await fetch('/api/daily-metrics');
       const j = await r.json();
       setItems(Array.isArray(j.items) ? j.items : []);
-    } catch {
+    } catch (err) {
+      console.error(err);
       setItems([]);
-      setError('Could not load recent entries.');
+      setError('Failed to load recent entries');
     }
   };
 
-  useEffect(() => { load(); }, []);
-
-  const onChange = (e) => {
-    const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
-  };
+  useEffect(() => {
+    load();
+  }, []);
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
     setError('');
+
+    const payload = {
+      date, // YYYY-MM-DD
+      revenue: revenue === '' ? null : Number(revenue),
+      target: target === '' ? null : Number(target),
+      occupancy: occupancy === '' ? null : Number(occupancy),
+      arr: arr === '' ? null : Number(arr),
+      notes: notes || null,
+    };
+
     try {
       const r = await fetch('/api/daily-metrics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: form.date,
-          revenue: Number(form.revenue) || null,
-          target: Number(form.target) || null,
-          occupancy: Number(form.occupancy) || null,
-          arr: Number(form.arr) || null,
-          notes: form.notes || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const j = await r.json();
-      if (!r.ok || j.ok === false) throw new Error(j.error || 'Save failed');
+
+      if (!r.ok || j.ok === false) {
+        throw new Error(j.error || 'Save failed');
+      }
+
+      // reload table
       await load();
     } catch (err) {
-      setError(err.message || 'Save failed');
-    } finally {
-      setSaving(false);
+      console.error(err);
+      setError('Save failed');
     }
   };
 
   return (
-    <main style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
+    <main>
       <h1>Admin — Daily Updates</h1>
 
-      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12, maxWidth: 680 }}>
-        <label>Date <input type="date" name="date" value={form.date} onChange={onChange} required /></label>
-        <label>Revenue (R) <input name="revenue" value={form.revenue} onChange={onChange} /></label>
-        <label>Target (R) <input name="target" value={form.target} onChange={onChange} /></label>
-        <label>Occupancy (%) <input name="occupancy" value={form.occupancy} onChange={onChange} /></label>
-        <label>ARR (R) <input name="arr" value={form.arr} onChange={onChange} /></label>
-        <label>Notes <textarea name="notes" value={form.notes} onChange={onChange} /></label>
-        <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save / Upsert'}</button>
-        {error && <div style={{ color: 'crimson' }}>{error}</div>}
-      </form>
+      <section className="form">
+        <form onSubmit={onSubmit}>
+          <div className="row">
+            <div>
+              <label htmlFor="date">Date</label>
+              <input
+                id="date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
 
-      <section style={{ marginTop: 28 }}>
-        <h2>Recent Entries</h2>
-        <button onClick={load} style={{ marginBottom: 8 }}>Refresh</button>
+            <div>
+              <label htmlFor="revenue">Revenue (R)</label>
+              <input
+                id="revenue"
+                inputMode="numeric"
+                type="number"
+                placeholder="e.g. 250000"
+                value={revenue}
+                onChange={(e) => setRevenue(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="target">Target (R)</label>
+              <input
+                id="target"
+                inputMode="numeric"
+                type="number"
+                placeholder="e.g. 300000"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="occupancy">Occupancy (%)</label>
+              <input
+                id="occupancy"
+                inputMode="numeric"
+                type="number"
+                step="1"
+                min="0"
+                max="100"
+                placeholder="e.g. 75"
+                value={occupancy}
+                onChange={(e) => setOccupancy(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="arr">ARR (R)</label>
+              <input
+                id="arr"
+                inputMode="numeric"
+                type="number"
+                placeholder="e.g. 1450"
+                value={arr}
+                onChange={(e) => setArr(e.target.value)}
+              />
+            </div>
+
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label htmlFor="notes">Notes</label>
+              <textarea
+                id="notes"
+                placeholder="Anything worth noting today?"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="actions">
+            <button type="submit">Save / Upsert</button>
+            {error && <span className="error">{error}</span>}
+          </div>
+        </form>
+      </section>
+
+      <section className="list">
+        <header>
+          <h2>Recent Entries</h2>
+          <a href="#" onClick={(e) => (e.preventDefault(), load())}>
+            Refresh
+          </a>
+        </header>
+
         {items.length === 0 ? (
-          <div>No data yet.</div>
+          <p>No data yet.</p>
         ) : (
-          <table cellPadding="8" style={{ borderCollapse: 'collapse' }}>
+          <table>
             <thead>
               <tr>
-                <th align="left">Date</th>
-                <th align="right">Revenue</th>
-                <th align="right">Target</th>
-                <th align="right">Occ %</th>
-                <th align="right">ARR</th>
-                <th align="left">Notes</th>
+                <th>Date</th>
+                <th>Revenue</th>
+                <th>Target</th>
+                <th>Occupancy</th>
+                <th>ARR</th>
+                <th>Notes</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
-                <tr key={it.id ?? it.date}>
-                  <td>{String(it.date).slice(0, 10)}</td>
-                  <td align="right">{it.revenue ?? ''}</td>
-                  <td align="right">{it.target ?? ''}</td>
-                  <td align="right">{it.occupancy ?? ''}</td>
-                  <td align="right">{it.arr ?? ''}</td>
-                  <td>{it.notes ?? ''}</td>
+              {items.map((row) => (
+                <tr key={row.id ?? row.date}>
+                  <td>{row.date}</td>
+                  <td>{row.revenue ?? '—'}</td>
+                  <td>{row.target ?? '—'}</td>
+                  <td>{row.occupancy ?? '—'}</td>
+                  <td>{row.arr ?? '—'}</td>
+                  <td>{row.notes ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </section>
-<Styles />
+
+      <Styles />
     </main>
+  );
+}
+
+/** STEP 2 styling (CSS-in-JS) */
+function Styles() {
+  return (
+    <style jsx global>{`
+      :root {
+        --bg: #0b0c10;
+        --card: #111317;
+        --line: #1f2937;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --link: #93c5fd;
+        --accent: #6366f1;
+      }
+
+      html, body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+          Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji',
+          'Segoe UI Emoji';
+      }
+
+      main {
+        max-width: 980px;
+        margin: 40px auto;
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+      }
+
+      h1 {
+        font-size: 22px;
+        margin: 0 0 16px;
+      }
+
+      .form {
+        margin-top: 8px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .row > div {
+        display: flex;
+        flex-direction: column;
+      }
+
+      label {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0 0 6px;
+      }
+
+      input[type='text'],
+      input[type='number'],
+      input[type='date'],
+      textarea {
+        background: #0f1115;
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 10px 12px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+
+      .actions {
+        margin-top: 12px;
+      }
+
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:hover {
+        filter: brightness(1.07);
+      }
+
+      .error {
+        margin-left: 12px;
+        color: #f87171;
+        font-size: 13px;
+      }
+
+      .list {
+        margin-top: 28px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+      }
+
+      .list header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .list a {
+        color: var(--link);
+        text-decoration: underline;
+        font-size: 14px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      @media (max-width: 640px) {
+        main {
+          margin: 12px;
+          padding: 16px;
+        }
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+    `}</style>
   );
 }
