@@ -1,57 +1,73 @@
 ﻿// pages/api/daily-metrics/index.js
-import prisma from '../../../lib/prisma' // or: import { prisma } from '../../../lib/prisma'
+import { prisma } from '../../../lib/prisma';
 
-function toUtcMidnight(dateStr) {
-  // Accepts "2025-08-22" or "2025/08/22"
-  const norm = String(dateStr || '').replaceAll('/', '-');
-  const [y, m, d] = norm.split('-').map(Number);
-  // guard against bad input
-  if (!y || !m || !d) throw new Error('Invalid date');
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+function parseIntOrNull(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
-const toInt = (v)   => (v === '' || v == null ? null : parseInt(v, 10));
-const toFloat = (v) => (v === '' || v == null ? null : parseFloat(v));
+function normalizeDateToUTC(dateStr) {
+  // Accepts 'YYYY-MM-DD' or locale strings; normalize to 00:00:00 UTC
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) throw new Error('Invalid date');
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
 
 export default async function handler(req, res) {
-  try {
-    if (req.method === 'GET') {
-      const rows = await prisma.dailyMetric.findMany({
-        orderBy: { date: 'desc' },
-        take: 100,
-      });
-      return res.status(200).json(rows);
-    }
+  if (req.method === 'POST') {
+    try {
+      const { date, revenue, target, occupancy, arr, notes } = req.body;
 
-    if (req.method === 'POST') {
-      const { date, revenue, target, occupancy, arr, notes } = req.body || {};
+      const start = normalizeDateToUTC(date);
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 1);
 
-      const when = toUtcMidnight(date);
       const data = {
-        date: when,
-        revenue:   toInt(revenue),
-        target:    toInt(target),
-        occupancy: toFloat(occupancy),
-        arr:       toInt(arr),
-        // If your schema uses @db.Text on `notes`, sending a JS string is fine
-        notes:     notes ?? null,
+        date: start,
+        revenue: parseIntOrNull(revenue),
+        target: parseIntOrNull(target),
+        occupancy: parseIntOrNull(occupancy),
+        arr: parseIntOrNull(arr),
+        notes: notes ?? null,
       };
 
-      // Because `date` is @unique in schema, we can upsert on it
-      await prisma.dailyMetric.upsert({
-        where: { date: when },
-        // never update the unique value itself
-        update: { revenue: data.revenue, target: data.target, occupancy: data.occupancy, arr: data.arr, notes: data.notes },
-        create: data,
+      // Find an existing row for that day (since date isn't unique yet)
+      const existing = await prisma.dailyMetric.findFirst({
+        where: { date: { gte: start, lt: end } },
+        select: { id: true },
       });
 
-      return res.status(200).json({ ok: true });
-    }
+      if (existing) {
+        await prisma.dailyMetric.update({
+          where: { id: existing.id },
+          data,
+        });
+      } else {
+        await prisma.dailyMetric.create({ data });
+      }
 
-    res.setHeader('Allow', ['GET', 'POST']);
-    return res.status(405).end('Method Not Allowed');
-  } catch (err) {
-    console.error('daily-metrics POST error:', err);
-    return res.status(500).json({ ok: false, error: err.message || 'Unknown error' });
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('POST /api/daily-metrics failed:', err);
+      return res.status(500).json({ ok: false, error: 'SAVE_FAILED' });
+    }
   }
+
+  if (req.method === 'GET') {
+    try {
+      const items = await prisma.dailyMetric.findMany({
+        orderBy: { date: 'desc' },
+        take: 30,
+      });
+      return res.status(200).json({ items });
+    } catch (err) {
+      console.error('GET /api/daily-metrics failed:', err);
+      return res.status(500).json({ ok: false, error: 'FETCH_FAILED' });
+    }
+  }
+
+  res.setHeader('Allow', ['GET', 'POST']);
+  return res.status(405).end('Method Not Allowed');
 }
