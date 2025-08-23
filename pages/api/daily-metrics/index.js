@@ -52,3 +52,4 @@ export default async function handler(req, res) {
   res.setHeader('Allow', ['GET', 'POST'])
   return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' })
 }
+export const config = { runtime: 'nodejs' }
