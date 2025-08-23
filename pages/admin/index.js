@@ -51,3 +51,11 @@ async function save() {
 ) : (
   (entries ?? []).map(/* ... */)
 )}
+// pages/admin/index.tsx  (or pages/admin.tsx)
+export const getServerSideProps = async () => {
+  return { props: {} }; // don’t fetch anything during build
+};
+
+export default function AdminPage() {
+  // keep your UI
+}
