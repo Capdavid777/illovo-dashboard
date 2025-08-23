@@ -1,46 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
 
-// put this just before the `export default function AdminPage()` line or anywhere inside the component's return
-const Styles = () => (
-  <style jsx>{`
-    .row {
-      display: grid;
-      grid-template-columns: 160px minmax(220px, 360px);
-      gap: 12px;
-      align-items: center;
-    }
-    .field {
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      width: 100%;
-      min-width: 220px;
-      font: inherit;
-      background: #fff;
-    }
-    textarea.field {
-      min-height: 96px;
-      resize: vertical;
-    }
-    .form {
-      display: grid;
-      gap: 12px;
-      max-width: 720px;
-    }
-    .btn {
-      padding: 10px 14px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      background: #111;
-      color: #fff;
-      cursor: pointer;
-      width: max-content;
-    }
-    .btn[disabled] { opacity: .6; cursor: default; }
-  `}</style>
-);
-
-
 export async function getServerSideProps() {
   // prevent static pre-render at build
   return { props: {} };
@@ -152,6 +111,82 @@ export default function AdminPage() {
           </table>
         )}
       </section>
+// put this just before the `export default function AdminPage()` line or anywhere inside the component's return
+const Styles = () => (
+  <style jsx>{`
+    .row {
+      display: grid;
+      grid-template-columns: 160px minmax(220px, 360px);
+      gap: 12px;
+      align-items: center;
+    }
+    .field {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      width: 100%;
+      min-width: 220px;
+      font: inherit;
+      background: #fff;
+    }
+    textarea.field {
+      min-height: 96px;
+      resize: vertical;
+    }
+    .form {
+      display: grid;
+      gap: 12px;
+      max-width: 720px;
+    }
+    .btn {
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #111;
+      color: #fff;
+      cursor: pointer;
+      width: max-content;
+    }
+    .btn[disabled] { opacity: .6; cursor: default; }
+  `}</style>
+);
+<form onSubmit={onSubmit} className="form">
+  <label className="row">
+    <span>Date</span>
+    <input className="field" type="date" name="date" value={form.date} onChange={onChange} required />
+  </label>
+
+  <label className="row">
+    <span>Revenue (R)</span>
+    <input className="field" type="number" inputMode="numeric" name="revenue" placeholder="0" value={form.revenue} onChange={onChange} />
+  </label>
+
+  <label className="row">
+    <span>Target (R)</span>
+    <input className="field" type="number" inputMode="numeric" name="target" placeholder="0" value={form.target} onChange={onChange} />
+  </label>
+
+  <label className="row">
+    <span>Occupancy (%)</span>
+    <input className="field" type="number" inputMode="numeric" name="occupancy" placeholder="0" value={form.occupancy} onChange={onChange} />
+  </label>
+
+  <label className="row">
+    <span>ARR (R)</span>
+    <input className="field" type="number" inputMode="numeric" name="arr" placeholder="0" value={form.arr} onChange={onChange} />
+  </label>
+
+  <label className="row">
+    <span>Notes</span>
+    <textarea className="field" name="notes" placeholder="Optional" value={form.notes} onChange={onChange} />
+  </label>
+
+  <button className="btn" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save / Upsert'}</button>
+  {error && <div style={{ color: 'crimson' }}>{error}</div>}
+</form>
+
+{/* add the style block somewhere inside your component's JSX */}
+<Styles />
     </main>
   );
 }
