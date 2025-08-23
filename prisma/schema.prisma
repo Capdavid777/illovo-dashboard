@@ -10,12 +10,12 @@ datasource db {
 
 model DailyMetric {
   id        Int      @id @default(autoincrement())
-  date      DateTime @unique
-  revenue   Int?
-  target    Int?
-  occupancy Float?
-  arr       Int?
-  notes     String?  @db.Text
+  date      DateTime @unique // <-- add this
+  revenue   Int
+  target    Int
+  occupancy Int
+  arr       Int
+  notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
