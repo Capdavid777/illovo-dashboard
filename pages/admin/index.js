@@ -1,5 +1,46 @@
 ﻿import { useEffect, useState } from 'react';
 
+// put this just before the `export default function AdminPage()` line or anywhere inside the component's return
+const Styles = () => (
+  <style jsx>{`
+    .row {
+      display: grid;
+      grid-template-columns: 160px minmax(220px, 360px);
+      gap: 12px;
+      align-items: center;
+    }
+    .field {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      width: 100%;
+      min-width: 220px;
+      font: inherit;
+      background: #fff;
+    }
+    textarea.field {
+      min-height: 96px;
+      resize: vertical;
+    }
+    .form {
+      display: grid;
+      gap: 12px;
+      max-width: 720px;
+    }
+    .btn {
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #111;
+      color: #fff;
+      cursor: pointer;
+      width: max-content;
+    }
+    .btn[disabled] { opacity: .6; cursor: default; }
+  `}</style>
+);
+
+
 export async function getServerSideProps() {
   // prevent static pre-render at build
   return { props: {} };
