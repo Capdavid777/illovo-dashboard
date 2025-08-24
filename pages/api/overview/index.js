@@ -1,3 +1,26 @@
+// in /pages/api/overview/index.js (example sketch)
+const rows = await prisma.dailyMetric.findMany({
+  orderBy: { date: 'asc' },
+});
+
+const series = rows.map(r => ({
+  date: r.date,              // ISO string
+  revenue: r.revenue || 0,
+  target:  r.target  || 0,
+  occupancy: r.occupancy || 0,
+  arr: r.arr || 0,
+}));
+
+res.status(200).json({
+  ok: true,
+  revenueToDate,
+  occupancyRate,
+  averageRoomRate,
+  targetVariance,
+  lastUpdated,
+  series, // <-- add this
+});
+
 // pages/api/overview/index.js
 export const config = { runtime: 'nodejs' }; // Prisma needs node runtime
 
