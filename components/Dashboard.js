@@ -1,78 +1,126 @@
 // components/Dashboard.js
-import React, { useState } from 'react';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { TrendingUp, TrendingDown, Calendar, Users, DollarSign, Target, Home, Activity } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
+} from 'recharts';
+import {
+  TrendingUp, TrendingDown, Calendar, Users, DollarSign,
+  Target, Home, Activity
+} from 'lucide-react';
 
-const Dashboard = () => {
-  const [selectedView, setSelectedView] = useState('overview');
-
-  // [Include all the dashboard component code from the previous artifact here]
-  // Key metrics from the report
-  const keyMetrics = {
-    roomCost: 767,
-    breakevenRoomRate: 1237,
-    currentRoomRate: 1042,
-    occupancyToDate: 46,
-    targetOccupancy: 62,
-    revenueToDate: 593854,
-    breakevenRevenue: 1403169,
-    varianceBehind: -356679,
-    totalRooms: 59,
-    roomsSold: 569,
-    averageRoomRate: 1042
+/**
+ * Normalize whatever /api/overview returns into the shape the dashboard needs.
+ * Works with multiple possible key names so small API differences don’t break the UI.
+ */
+function normalizeOverview(raw = {}) {
+  const get = (keys, fallback) => {
+    for (const k of keys) {
+      const v = raw?.[k];
+      if (v !== undefined && v !== null) return v;
+    }
+    return fallback;
   };
 
-  // Daily performance data
-  const dailyData = [
-    { day: 1, target: 45264, revenue: 29304, occupancy: 47, rate: 1047, met: false },
-    { day: 2, target: 45264, revenue: 45045, occupancy: 75, rate: 1024, met: false },
-    { day: 3, target: 45264, revenue: 26599, occupancy: 44, rate: 1023, met: false },
-    { day: 4, target: 45264, revenue: 19847, occupancy: 32, rate: 1045, met: false },
-    { day: 5, target: 45264, revenue: 23434, occupancy: 39, rate: 1019, met: false },
-    { day: 6, target: 45264, revenue: 24675, occupancy: 41, rate: 1028, met: false },
-    { day: 7, target: 45264, revenue: 26622, occupancy: 42, rate: 1065, met: false },
-    { day: 8, target: 45264, revenue: 51237, occupancy: 81, rate: 1067, met: true },
-    { day: 9, target: 45264, revenue: 64580, occupancy: 97, rate: 1133, met: true },
-    { day: 10, target: 45264, revenue: 24925, occupancy: 39, rate: 1084, met: false },
-    { day: 11, target: 45264, revenue: 22173, occupancy: 36, rate: 1056, met: false },
-    { day: 12, target: 45264, revenue: 21229, occupancy: 36, rate: 1011, met: false },
-    { day: 13, target: 45264, revenue: 26417, occupancy: 42, rate: 1057, met: false },
-    { day: 14, target: 45264, revenue: 31669, occupancy: 53, rate: 1022, met: false },
-    { day: 15, target: 45264, revenue: 25298, occupancy: 44, rate: 973, met: false },
-    { day: 16, target: 45264, revenue: 40182, occupancy: 71, rate: 957, met: false },
-    { day: 17, target: 45264, revenue: 19955, occupancy: 32, rate: 1050, met: false },
-    { day: 18, target: 45264, revenue: 15982, occupancy: 27, rate: 999, met: false },
-    { day: 19, target: 45264, revenue: 16869, occupancy: 27, rate: 1054, met: false },
-    { day: 20, target: 45264, revenue: 17483, occupancy: 27, rate: 1093, met: false },
-    { day: 21, target: 45264, revenue: 20328, occupancy: 32, rate: 1070, met: false }
-  ];
+  const num = (v, d = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : d;
+  };
 
-  // Room type data
-  const roomTypeData = [
+  // Top-level metrics (with aliases)
+  const revenueToDate = num(get(['revenueToDate', 'revenue_to_date', 'revenueTD', 'revenue'], 0));
+  const targetToDate  = num(get(['targetToDate', 'target_to_date', 'targetTD', 'target'], 0));
+  const averageRoomRate = num(get(['avgRoomRate', 'averageRoomRate', 'arr', 'average_room_rate'], 0));
+  const providedOcc = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
+
+  // Daily series (with aliases)
+  const dailyRaw = get(['daily', 'dailySeries', 'items', 'rows'], []) || [];
+  const dailyData = dailyRaw.map((d, i) => ({
+    day: d.day ?? (d.date ? String(d.date).slice(-2) : i + 1),
+    target:   num(d.target ?? d.targetRevenue ?? d.target_revenue, 0),
+    revenue:  num(d.revenue, 0),
+    occupancy:num(d.occupancy ?? d.occ, 0),
+    rate:     num(d.rate ?? d.arr ?? d.averageRate, 0),
+    met:      d.met ?? undefined,
+  }));
+
+  // If occupancy isn’t provided, compute a simple average from daily points.
+  let occupancyRate = num(providedOcc, NaN);
+  if (!Number.isFinite(occupancyRate)) {
+    const vals = dailyData.map(d => d.occupancy).filter(n => Number.isFinite(n));
+    occupancyRate = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+  }
+
+  const targetVariance = targetToDate - revenueToDate;
+  const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
+
+  // Optional room-type & historical series if your API provides them
+  const roomTypes = get(['roomTypes', 'roomTypesData'], null);
+  const history   = get(['history', 'yearlyData'], null);
+
+  return {
+    revenueToDate,
+    targetToDate,
+    averageRoomRate,
+    occupancyRate,
+    targetVariance,
+    dailyData,
+    lastUpdated,
+    roomTypes,
+    history,
+  };
+}
+
+const currency = (n) => `R${Number(n || 0).toLocaleString()}`;
+const pct = (n) => `${Math.round(Number(n || 0))}%`;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+const Dashboard = ({ overview }) => {
+  const [selectedView, setSelectedView] = useState('overview');
+
+  const {
+    revenueToDate,
+    targetToDate,
+    averageRoomRate,
+    occupancyRate,
+    targetVariance,
+    dailyData,
+    lastUpdated,
+    roomTypes,
+    history,
+  } = useMemo(() => normalizeOverview(overview), [overview]);
+
+  // Fallback datasets for sections your API may not provide yet
+  const fallbackRoomTypeData = [
     { type: 'Queen', rooms: 26, available: 806, sold: 247, revenue: 212699, rate: 861, occupancy: 31 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 129, revenue: 106721, rate: 827, occupancy: 42 },
     { type: '1 Bed', rooms: 16, available: 496, sold: 258, revenue: 279158, rate: 1082, occupancy: 52 },
     { type: '2 Bed', rooms: 7, available: 217, sold: 129, revenue: 176339, rate: 1367, occupancy: 59 }
   ];
+  const roomTypeData = roomTypes && Array.isArray(roomTypes) && roomTypes.length ? roomTypes : fallbackRoomTypeData;
 
-  // Historical data
-  const yearlyData = [
+  const fallbackYearlyData = [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
     { year: '2024', roomsSold: 759, occupancy: 45, revenue: 701738, rate: 925 },
     { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
   ];
+  const yearlyData = history && Array.isArray(history) && history.length ? history : fallbackYearlyData;
 
   const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
 
+  // Derived UI helpers
+  const revenueProgressPct   = targetToDate > 0 ? Math.round(100 * clamp01(revenueToDate / targetToDate)) : 0;
+  const occupancyTargetPct   = 62; // update if your API returns a target occupancy
+  const occupancyProgressPct = Math.round(100 * clamp01(occupancyRate / occupancyTargetPct));
+
   const MetricCard = ({ title, value, subtitle, icon: Icon, trend, color = 'blue' }) => {
     const colorClasses = {
-      blue: 'bg-blue-50 border-blue-200 text-blue-800',
-      red: 'bg-red-50 border-red-200 text-red-800',
-      green: 'bg-green-50 border-green-200 text-green-800',
+      blue:   'bg-blue-50 border-blue-200 text-blue-800',
+      red:    'bg-red-50 border-red-200 text-red-800',
+      green:  'bg-green-50 border-green-200 text-green-800',
       yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800'
     };
-
     return (
       <div className={`p-6 rounded-lg border-2 ${colorClasses[color]} bg-white shadow-lg hover:shadow-xl transition-shadow`}>
         <div className="flex items-center justify-between">
@@ -85,7 +133,7 @@ const Dashboard = () => {
             <Icon className="w-6 h-6" />
           </div>
         </div>
-        {trend && (
+        {typeof trend === 'number' && (
           <div className="mt-4 flex items-center">
             {trend > 0 ? (
               <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
@@ -107,31 +155,31 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard
           title="Revenue to Date"
-          value={`R${keyMetrics.revenueToDate.toLocaleString()}`}
-          subtitle="vs R1,403,169 target"
+          value={currency(revenueToDate)}
+          subtitle={targetToDate ? `vs ${currency(targetToDate)} target` : undefined}
           icon={DollarSign}
           color="blue"
         />
         <MetricCard
           title="Occupancy Rate"
-          value={`${keyMetrics.occupancyToDate}%`}
-          subtitle="vs 62% target"
+          value={pct(occupancyRate)}
+          subtitle={`vs ${pct(occupancyTargetPct)} target`}
           icon={Users}
-          color={keyMetrics.occupancyToDate >= 62 ? 'green' : 'red'}
+          color={occupancyRate >= occupancyTargetPct ? 'green' : 'red'}
         />
         <MetricCard
           title="Average Room Rate"
-          value={`R${keyMetrics.currentRoomRate}`}
-          subtitle="vs R1,237 breakeven"
+          value={currency(averageRoomRate)}
+          subtitle="vs breakeven"
           icon={Home}
-          color={keyMetrics.currentRoomRate >= 1237 ? 'green' : 'yellow'}
+          color={averageRoomRate >= 1237 ? 'green' : 'yellow'}
         />
         <MetricCard
           title="Target Variance"
-          value={`R${Math.abs(keyMetrics.varianceBehind).toLocaleString()}`}
-          subtitle="Behind target"
+          value={currency(Math.abs(targetVariance))}
+          subtitle={targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
           icon={Target}
-          color="red"
+          color={targetVariance >= 0 ? 'red' : 'green'}
         />
       </div>
 
@@ -142,19 +190,19 @@ const Dashboard = () => {
           <div>
             <div className="flex justify-between mb-2">
               <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-              <span className="text-sm text-gray-500">42% of target</span>
+              <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
-              <div className="bg-blue-600 h-3 rounded-full" style={{ width: '42%' }}></div>
+              <div className="bg-blue-600 h-3 rounded-full" style={{ width: `${revenueProgressPct}%` }} />
             </div>
           </div>
           <div>
             <div className="flex justify-between mb-2">
               <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-              <span className="text-sm text-gray-500">74% of target</span>
+              <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
-              <div className="bg-green-600 h-3 rounded-full" style={{ width: '74%' }}></div>
+              <div className="bg-green-600 h-3 rounded-full" style={{ width: `${occupancyProgressPct}%` }} />
             </div>
           </div>
         </div>
@@ -164,17 +212,23 @@ const Dashboard = () => {
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-lg font-semibold mb-4">Daily Revenue vs Target</h3>
         <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dailyData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="day" />
-              <YAxis />
-              <Tooltip formatter={(value) => [`R${value.toLocaleString()}`, '']} />
-              <Legend />
-              <Bar dataKey="target" fill="#E5E7EB" name="Daily Target" />
-              <Bar dataKey="revenue" fill="#3B82F6" name="Actual Revenue" />
-            </BarChart>
-          </ResponsiveContainer>
+          {dailyData && dailyData.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" />
+                <YAxis />
+                <Tooltip formatter={(value) => [`${currency(value)}`, '']} />
+                <Legend />
+                <Bar dataKey="target" fill="#E5E7EB" name="Daily Target" />
+                <Bar dataKey="revenue" fill="#3B82F6" name="Actual Revenue" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              No daily data yet.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -185,7 +239,7 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {roomTypeData.map((room, index) => (
           <MetricCard
-            key={room.type}
+            key={room.type || index}
             title={room.type}
             value={`${room.occupancy}%`}
             subtitle={`R${room.rate} avg rate`}
@@ -215,7 +269,7 @@ const Dashboard = () => {
                     <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => [`R${value.toLocaleString()}`, 'Revenue']} />
+                <Tooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -225,22 +279,22 @@ const Dashboard = () => {
           <h3 className="text-lg font-semibold mb-4">Room Type Performance</h3>
           <div className="space-y-4">
             {roomTypeData.map((room, index) => (
-              <div key={room.type} className="border-l-4 pl-4" style={{ borderColor: colors[index] }}>
+              <div key={room.type || index} className="border-l-4 pl-4" style={{ borderColor: colors[index % colors.length] }}>
                 <div className="flex justify-between items-center">
                   <span className="font-medium">{room.type}</span>
                   <span className="text-sm text-gray-500">{room.sold}/{room.available}</span>
                 </div>
                 <div className="text-sm text-gray-600">
-                  Revenue: R{room.revenue.toLocaleString()} | Rate: R{room.rate}
+                  Revenue: {currency(room.revenue)} | Rate: {currency(room.rate)}
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                  <div 
-                    className="h-2 rounded-full" 
-                    style={{ 
-                      width: `${room.occupancy}%`, 
-                      backgroundColor: colors[index] 
+                  <div
+                    className="h-2 rounded-full"
+                    style={{
+                      width: `${room.occupancy}%`,
+                      backgroundColor: colors[index % colors.length]
                     }}
-                  ></div>
+                  />
                 </div>
               </div>
             ))}
@@ -261,7 +315,7 @@ const Dashboard = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis />
-                <Tooltip formatter={(value) => [`R${value.toLocaleString()}`, 'Revenue']} />
+                <Tooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
                 <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
@@ -298,13 +352,13 @@ const Dashboard = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {yearlyData.map((year) => (
-                <tr key={year.year}>
+              {yearlyData.map((year, i) => (
+                <tr key={year.year || i}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{year.year}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{year.roomsSold}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{year.occupancy}%</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">R{year.revenue.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">R{year.rate}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(year.revenue)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(year.rate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -322,12 +376,16 @@ const Dashboard = () => {
           <div className="flex justify-between items-center py-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Reserved Suites Illovo</h1>
-              <p className="text-sm text-gray-500">Revenue Dashboard - August 2025</p>
+              <p className="text-sm text-gray-500">Revenue Dashboard</p>
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                <p className="text-sm font-medium">21 Aug 2025</p>
+                <p className="text-sm font-medium">
+                  {lastUpdated
+                    ? new Date(lastUpdated).toLocaleDateString()
+                    : new Date().toLocaleDateString()}
+                </p>
               </div>
             </div>
           </div>
