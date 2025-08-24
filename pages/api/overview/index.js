@@ -1,98 +1,98 @@
-// in /pages/api/overview/index.js (example sketch)
-const rows = await prisma.dailyMetric.findMany({
-  orderBy: { date: 'asc' },
-});
-
-const series = rows.map(r => ({
-  date: r.date,              // ISO string
-  revenue: r.revenue || 0,
-  target:  r.target  || 0,
-  occupancy: r.occupancy || 0,
-  arr: r.arr || 0,
-}));
-
-res.status(200).json({
-  ok: true,
-  revenueToDate,
-  occupancyRate,
-  averageRoomRate,
-  targetVariance,
-  lastUpdated,
-  series, // <-- add this
-});
-
 // pages/api/overview/index.js
-export const config = { runtime: 'nodejs' }; // Prisma needs node runtime
+export const config = { runtime: 'nodejs' };
 
 import { PrismaClient } from '@prisma/client';
 
-// Reuse a single Prisma instance across hot reloads in dev
-let prisma = global.__prisma || new PrismaClient();
-if (process.env.NODE_ENV !== 'production') global.__prisma = prisma;
+let prisma = globalThis.__prisma || new PrismaClient();
+if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-function startOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
-}
-function endOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-}
+const toNum = (n) => {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : 0;
+};
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
-  }
+  // make sure nothing is cached anywhere
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 
   try {
     const now = new Date();
-    const from = startOfMonth(now);
-    const to = endOfMonth(now);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Pull all this month’s entries
+    // Pull this month's rows (adjust if you want a different window)
     const rows = await prisma.dailyMetric.findMany({
-      where: { date: { gte: from, lte: to } },
+      where: { date: { gte: startOfMonth, lte: now } },
       orderBy: { date: 'asc' },
     });
 
+    if (!rows || rows.length === 0) {
+      return res.status(200).json({
+        ok: true,
+        revenueToDate: 0,
+        occupancyRate: 0,
+        averageRoomRate: 0,
+        targetVariance: 0,
+        lastUpdated: null,
+        series: [],
+      });
+    }
+
     // Aggregate
-    const revenueToDate = rows.reduce((sum, r) => sum + (r.revenue || 0), 0);
+    let revenueSum = 0;
+    let targetSum = 0;
 
-    const latest = rows[rows.length - 1] || null;
+    let occSum = 0;
+    let occCount = 0;
 
-    // Field names assume your schema:
-    // model DailyMetric {
-    //   id       Int @id @default(autoincrement())
-    //   date     DateTime @unique
-    //   revenue  Int?
-    //   target   Int?
-    //   occupancy Float?
-    //   arr      Int?      // Average Room Rate (R)
-    //   notes    String?   @db.Text
-    //   createdAt DateTime @default(now())
-    //   updatedAt DateTime @updatedAt
-    // }
-    const occupancyRate    = latest?.occupancy ?? 0; // % (0–100)
-    const averageRoomRate  = latest?.arr ?? 0;       // R
-    const target           = latest?.target ?? 0;    // R
-    const targetVariance   = target - revenueToDate; // R
-    const lastUpdated      = latest?.date ?? null;
+    let arrSum = 0;
+    let arrCount = 0;
 
-    res.setHeader('Cache-Control', 'no-store');
+    for (const r of rows) {
+      revenueSum += toNum(r.revenue);
+      targetSum += toNum(r.target);
+
+      if (r.occupancy != null) {
+        occSum += toNum(r.occupancy);
+        occCount += 1;
+      }
+      if (r.arr != null) {
+        arrSum += toNum(r.arr);
+        arrCount += 1;
+      }
+    }
+
+    const occupancyRate = occCount ? occSum / occCount : 0;
+    const averageRoomRate = arrCount ? arrSum / arrCount : 0;
+    const targetVariance = targetSum - revenueSum;
+
+    const last = rows[rows.length - 1];
+    const lastUpdated = (last.updatedAt || last.createdAt || last.date)?.toISOString?.() || null;
+
+    const series = rows.map((r) => ({
+      date: r.date instanceof Date ? r.date.toISOString() : r.date,
+      revenue: toNum(r.revenue),
+      target: toNum(r.target),
+      occupancy: toNum(r.occupancy),
+      arr: toNum(r.arr),
+    }));
+
     return res.status(200).json({
       ok: true,
-      revenueToDate,
-      occupancyRate,
+      revenueToDate: revenueSum,
+      occupancyRate,       // 0–100 expected by the UI
       averageRoomRate,
-      targetVariance,
+      targetVariance,      // target - revenue
       lastUpdated,
+      series,
     });
   } catch (err) {
-    const debug = req.query.debug ? String(req.query.debug) : '';
-    console.error('GET /api/overview failed:', err);
-    // If you call /api/overview?debug=1 you’ll see the error string to help debug
+    // Never leak internals; always return a safe object
+    console.error('overview API error:', err);
     return res.status(200).json({
       ok: false,
-      error: debug ? String(err?.message || err) : 'FETCH_FAILED',
+      error: 'INTERNAL_ERROR',
     });
   }
 }
