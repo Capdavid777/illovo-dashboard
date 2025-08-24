@@ -1,170 +1,84 @@
 // pages/index.js
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-/**
- * SSR: build a robust absolute base URL and fetch fresh data
- * - works on Vercel and locally
- * - no cache
- * - forwards cookies (useful if your API reads auth/session)
- * - never throws: returns props even on failure
- */
-export async function getServerSideProps({ req }) {
-  // Prefer an explicit env var if you set one in Vercel:
-  // NEXT_PUBLIC_BASE_URL = https://illovo-dashboard.vercel.app
-  const explicit = process.env.NEXT_PUBLIC_BASE_URL;
+// very small helper to format as "R 12,345"
+const money = (n) =>
+  new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }).format(n || 0);
 
-  const proto = req.headers['x-forwarded-proto'] || 'http';
-  const host =
-    req.headers['x-forwarded-host'] ||
-    req.headers.host ||
-    'localhost:3000';
+export default function Dashboard() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
 
-  const base = explicit || `${proto}://${host}`;
-
-  try {
-    const res = await fetch(`${base}/api/overview`, {
-      cache: 'no-store',
-      headers: { cookie: req.headers.cookie || '' },
-    });
-
-    if (!res.ok) {
-      throw new Error(`API /overview responded ${res.status}`);
-    }
-
-    const data = await res.json();
-
-    return {
-      props: {
-        initialData: data,
-        hadServerError: false,
-        base,
-      },
-    };
-  } catch (err) {
-    console.error('getServerSideProps failed:', err);
-    // Keep page alive; client will refetch
-    return {
-      props: {
-        initialData: null,
-        hadServerError: true,
-        base,
-      },
-    };
-  }
-}
-
-/**
- * Optional helper: format numbers nicely if you want to show
- * a minimal fallback while wiring your existing UI to `data`.
- */
-function formatCurrencyZAR(n) {
-  try {
-    return new Intl.NumberFormat('en-ZA', {
-      style: 'currency',
-      currency: 'ZAR',
-      maximumFractionDigits: 0,
-    }).format(Number(n || 0));
-  } catch {
-    return `R${Number(n || 0).toLocaleString('en-ZA')}`;
-  }
-}
-
-/**
- * 🔧 Put your existing dashboard JSX here if you’d like to render
- * directly from the fresh `data` that SSR/CSR fetches.
- * If you’d rather keep your current UI logic, you can leave this
- * as-is—the page still works and auto-refreshes data.
- */
-function renderExistingDashboard(data) {
-  if (!data) {
-    return (
-      <div style={{ padding: 24 }}>
-        <h1>Reserved Suites Illovo</h1>
-        <p>Loading latest figures…</p>
-      </div>
-    );
-  }
-
-  // Example minimal readout (safe if you don’t want to wire your UI yet)
-  const overview = data || {};
-  return (
-    <div style={{ padding: 24 }}>
-      <h1>Reserved Suites Illovo</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, maxWidth: 1100 }}>
-        <div style={{ padding: 16, border: '1px solid #eee', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Revenue to Date</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{formatCurrencyZAR(overview.revenueToDate)}</div>
-        </div>
-        <div style={{ padding: 16, border: '1px solid #eee', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Occupancy Rate</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>
-            {overview.occupancyRate != null ? `${overview.occupancyRate}%` : '—'}
-          </div>
-        </div>
-        <div style={{ padding: 16, border: '1px solid #eee', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Average Room Rate</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{formatCurrencyZAR(overview.averageRoomRate)}</div>
-        </div>
-        <div style={{ padding: 16, border: '1px solid #eee', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Target Variance</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{formatCurrencyZAR(overview.targetVariance)}</div>
-        </div>
-      </div>
-
-      {/* 🔽 If you want, render the rest of your existing JSX below using `overview` */}
-      {/* Your existing charts/tables/cards… */}
-    </div>
-  );
-}
-
-/**
- * Page component
- * - Seeds state with SSR data
- * - If SSR failed, does a client fetch (no-cache) after mount
- * - You can keep your existing JSX; wire it to `data` if desired
- */
-export default function DashboardPage({ initialData, hadServerError }) {
-  const [data, setData] = useState(initialData);
-  const [pending, setPending] = useState(false);
-
-  // Client refresh (only if SSR failed OR you want to keep it always fresh)
   useEffect(() => {
     let cancelled = false;
-
-    async function refresh() {
-      // If SSR already provided data and you don’t need a live refresh,
-      // skip this block (or keep it to always ensure fresh on each view).
-      if (!hadServerError && initialData) return;
-
-      setPending(true);
+    (async () => {
       try {
-        const res = await fetch('/api/overview', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`Client GET /api/overview ${res.status}`);
-        const json = await res.json();
-        if (!cancelled) setData(json);
+        setLoading(true);
+        setErr('');
+        const r = await fetch('/api/overview', { cache: 'no-store' }); // force fresh
+        const j = await r.json();
+        if (!cancelled) {
+          if (!j.ok) throw new Error(j.error || 'FETCH_FAILED');
+          setData(j);
+        }
       } catch (e) {
-        console.error(e);
+        if (!cancelled) setErr(e.message || 'ERROR');
       } finally {
-        if (!cancelled) setPending(false);
+        if (!cancelled) setLoading(false);
       }
-    }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-    refresh();
-    return () => {
-      cancelled = true;
-    };
-  }, [hadServerError, initialData]);
+  if (loading) return <div style={{ padding: 24 }}>
+    <h2>Reserved Suites Illovo</h2>
+    <p>Loading latest figures…</p>
+  </div>;
 
-  // If you already have a big JSX tree below, you can
-  // replace this return with your existing UI and read from `data`.
+  if (err) return <div style={{ padding: 24 }}>
+    <h2>Reserved Suites Illovo</h2>
+    <p style={{ color: 'crimson' }}>Failed to load: {err}</p>
+  </div>;
+
+  const t = data?.totals || {};
+  // Safe fallbacks
+  const revenueToDate   = Number(t.revenueToDate || 0);
+  const targetToDate    = Number(t.targetToDate || 0);
+  const averageRoomRate = Number(t.averageRoomRate || 0);
+  const occupancyRate   = Number(t.occupancyRate || 0); // already percent (0–100)
+  const targetVariance  = Number(t.targetVariance || 0);
+
+  const Card = ({ title, value, sub }) => (
+    <div style={{
+      border: '1px solid #eee',
+      borderRadius: 8,
+      padding: 16,
+      minWidth: 260,
+      marginRight: 16,
+      marginBottom: 16,
+      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+    }}>
+      <div style={{ opacity: 0.75, fontSize: 13 }}>{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{value}</div>
+      {sub ? <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>{sub}</div> : null}
+    </div>
+  );
+
   return (
-    <>
-      {renderExistingDashboard(data)}
-      {pending && (
-        <div style={{ padding: 12, opacity: 0.6, fontSize: 12 }}>
-          Refreshing…
-        </div>
-      )}
-    </>
+    <div style={{ padding: 24 }}>
+      <h2 style={{ marginBottom: 20 }}>Reserved Suites Illovo</h2>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+        <Card title="Revenue to Date"  value={money(revenueToDate)} />
+        <Card title="Target to Date"   value={money(targetToDate)} />
+        <Card title="Average Room Rate" value={money(averageRoomRate)} />
+        <Card title="Occupancy Rate"   value={`${occupancyRate}%`} />
+        <Card title="Target Variance"  value={money(targetVariance)} sub="Target − Revenue" />
+      </div>
+
+      {/* Keep your charts/tables below; they can read `data.items` (daily rows) */}
+      {/* Example: console.log(data.items) */}
+    </div>
   );
 }

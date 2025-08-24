@@ -1,98 +1,75 @@
 // pages/api/overview/index.js
-export const config = { runtime: 'nodejs' };
-
 import { PrismaClient } from '@prisma/client';
 
-let prisma = globalThis.__prisma || new PrismaClient();
-if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
+export const config = { runtime: 'nodejs' };
 
-const toNum = (n) => {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : 0;
-};
+const prisma = new PrismaClient();
+
+function monthWindowUtc() {
+  const now = new Date();
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  const to   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+  return { from, to };
+}
 
 export default async function handler(req, res) {
-  // make sure nothing is cached anywhere
-  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
-  res.setHeader('CDN-Cache-Control', 'no-store');
-  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
+  }
+
+  // absolutely no cache
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
 
   try {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { from, to } = monthWindowUtc();
 
-    // Pull this month's rows (adjust if you want a different window)
     const rows = await prisma.dailyMetric.findMany({
-      where: { date: { gte: startOfMonth, lte: now } },
+      where: { date: { gte: from, lte: to } },
       orderBy: { date: 'asc' },
+      // select only what we aggregate
+      select: { date: true, revenue: true, target: true, occupancy: true, arr: true },
     });
 
-    if (!rows || rows.length === 0) {
-      return res.status(200).json({
-        ok: true,
-        revenueToDate: 0,
-        occupancyRate: 0,
-        averageRoomRate: 0,
-        targetVariance: 0,
-        lastUpdated: null,
-        series: [],
-      });
-    }
-
-    // Aggregate
+    // Sum/average safely (treat null/undefined as 0, and ignore nulls when averaging)
     let revenueSum = 0;
     let targetSum = 0;
-
-    let occSum = 0;
-    let occCount = 0;
-
-    let arrSum = 0;
-    let arrCount = 0;
+    let arrSum = 0, arrCount = 0;
+    let occSum = 0, occCount = 0;
 
     for (const r of rows) {
-      revenueSum += toNum(r.revenue);
-      targetSum += toNum(r.target);
+      const revenue = Number(r.revenue ?? 0);
+      const target  = Number(r.target  ?? 0);
+      const arr     = r.arr !== null && r.arr !== undefined ? Number(r.arr) : null;
+      const occ     = r.occupancy !== null && r.occupancy !== undefined ? Number(r.occupancy) : null;
 
-      if (r.occupancy != null) {
-        occSum += toNum(r.occupancy);
-        occCount += 1;
-      }
-      if (r.arr != null) {
-        arrSum += toNum(r.arr);
-        arrCount += 1;
-      }
+      revenueSum += isFinite(revenue) ? revenue : 0;
+      targetSum  += isFinite(target)  ? target  : 0;
+
+      if (arr !== null && isFinite(arr)) { arrSum += arr; arrCount += 1; }
+      if (occ !== null && isFinite(occ)) { occSum += occ; occCount += 1; }
     }
 
-    const occupancyRate = occCount ? occSum / occCount : 0;
-    const averageRoomRate = arrCount ? arrSum / arrCount : 0;
+    const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
+    // If you store occupancy as a percentage number (e.g. 46 for 46%), this average is correct:
+    const occupancyRate = occCount ? +(occSum / occCount).toFixed(1) : 0;
+
     const targetVariance = targetSum - revenueSum;
-
-    const last = rows[rows.length - 1];
-    const lastUpdated = (last.updatedAt || last.createdAt || last.date)?.toISOString?.() || null;
-
-    const series = rows.map((r) => ({
-      date: r.date instanceof Date ? r.date.toISOString() : r.date,
-      revenue: toNum(r.revenue),
-      target: toNum(r.target),
-      occupancy: toNum(r.occupancy),
-      arr: toNum(r.arr),
-    }));
 
     return res.status(200).json({
       ok: true,
-      revenueToDate: revenueSum,
-      occupancyRate,       // 0–100 expected by the UI
-      averageRoomRate,
-      targetVariance,      // target - revenue
-      lastUpdated,
-      series,
+      period: { from, to },
+      totals: {
+        revenueToDate: revenueSum,
+        targetToDate: targetSum,
+        averageRoomRate,
+        occupancyRate,       // already a percent number
+        targetVariance,
+      },
+      items: rows, // handy for tables/charts later
     });
   } catch (err) {
-    // Never leak internals; always return a safe object
-    console.error('overview API error:', err);
-    return res.status(200).json({
-      ok: false,
-      error: 'INTERNAL_ERROR',
-    });
+    console.error('overview error:', err);
+    return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
   }
 }
