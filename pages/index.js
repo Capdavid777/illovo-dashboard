@@ -31,3 +31,36 @@ function Home() {
 }
 
 export default withPageAuthRequired(Home);
+
+// pages/index.js  (append or replace your data loader)
+
+// This runs on *every request* on the server.
+export async function getServerSideProps(ctx) {
+  try {
+    // Use your own domain in production so cookies/env are correct.
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      'https://illovo-dashboard.vercel.app';
+
+    const res = await fetch(`${base}/api/overview`, {
+      // IMPORTANT: prevent Next from caching this fetch
+      cache: 'no-store',
+      // (optional extra belt-and-braces)
+      headers: { 'x-no-cache': Date.now().toString() },
+    });
+
+    const data = await res.json();
+
+    // Also tell any proxy/CDN not to cache this page
+    ctx.res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate'
+    );
+
+    // If your component expects a different prop shape, map it here:
+    return { props: { overview: data } };
+  } catch (e) {
+    // Never hard-crash the page
+    return { props: { overview: null, error: 'fetch-failed' } };
+  }
+}
