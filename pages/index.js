@@ -1,11 +1,22 @@
-import { useUser, withPageAuthRequired } from '@auth0/nextjs-auth0/client';
-import Dashboard from '../components/Dashboard';
+// pages/index.js
 import Link from 'next/link';
+import Dashboard from '../components/Dashboard';
 
-function Home() {
+// Client-side hooks (for the top bar loading state)
+import { useUser, withPageAuthRequired as withPageAuthRequiredClient } from '@auth0/nextjs-auth0/client';
+// Server-side wrapper (so SSR is also protected)
+import { withPageAuthRequired as withPageAuthRequiredSSR } from '@auth0/nextjs-auth0';
+
+function Home({ overview }) {
   const { user, isLoading } = useUser();
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -15,52 +26,44 @@ function Home() {
           <div className="text-sm">
             Welcome, <span className="font-medium">{user?.name || user?.email}</span>
           </div>
-          <Link
-            href="/api/auth/logout"
-            className="text-sm hover:text-gray-300 underline"
-          >
+          <Link href="/api/auth/logout" className="text-sm hover:text-gray-300 underline">
             Sign Out
           </Link>
         </div>
       </div>
-      
-      {/* Dashboard */}
-      <Dashboard />
+
+      {/* Dashboard gets the fresh server-side data here */}
+      <Dashboard overview={overview} />
     </div>
   );
 }
 
-export default withPageAuthRequired(Home);
+// Protect the page component
+export default withPageAuthRequiredClient(Home);
 
-// pages/index.js  (append or replace your data loader)
+// Protect SSR too and fetch fresh data for every request
+export const getServerSideProps = withPageAuthRequiredSSR({
+  async getServerSideProps(ctx) {
+    try {
+      const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://illovo-dashboard.vercel.app';
 
-// This runs on *every request* on the server.
-export async function getServerSideProps(ctx) {
-  try {
-    // Use your own domain in production so cookies/env are correct.
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      'https://illovo-dashboard.vercel.app';
+      const res = await fetch(`${base}/api/overview`, {
+        cache: 'no-store',
+        headers: { 'x-no-cache': Date.now().toString() },
+      });
 
-    const res = await fetch(`${base}/api/overview`, {
-      // IMPORTANT: prevent Next from caching this fetch
-      cache: 'no-store',
-      // (optional extra belt-and-braces)
-      headers: { 'x-no-cache': Date.now().toString() },
-    });
+      const overview = await res.json();
 
-    const data = await res.json();
+      // Ensure the page itself isn’t cached
+      ctx.res.setHeader(
+        'Cache-Control',
+        'no-store, no-cache, must-revalidate, proxy-revalidate'
+      );
 
-    // Also tell any proxy/CDN not to cache this page
-    ctx.res.setHeader(
-      'Cache-Control',
-      'no-store, no-cache, must-revalidate, proxy-revalidate'
-    );
-
-    // If your component expects a different prop shape, map it here:
-    return { props: { overview: data } };
-  } catch (e) {
-    // Never hard-crash the page
-    return { props: { overview: null, error: 'fetch-failed' } };
-  }
-}
+      return { props: { overview } };
+    } catch (e) {
+      // Never crash the page if the API fails
+      return { props: { overview: null, error: 'fetch-failed' } };
+    }
+  },
+});
