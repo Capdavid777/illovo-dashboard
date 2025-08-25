@@ -19,3 +19,42 @@ model DailyMetric {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model DailyMetric {
+  id         Int       @id @default(autoincrement())
+  date       DateTime  @unique
+  revenue    Int?
+  target     Int?
+  occupancy  Float?    // store as 0..100 (%)
+  arr        Int?      // Average Daily Rate (ZAR)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model RoomTypeMetric {
+  id         Int       @id @default(autoincrement())
+  date       DateTime
+  type       String
+  rooms      Int?
+  available  Int?
+  sold       Int?
+  revenue    Int?
+  rate       Int?
+  occupancy  Float?    // 0..100 (%)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([date, type])
+}
+
+model YearlyMetric {
+  id         Int       @id @default(autoincrement())
+  year       Int       @unique
+  roomsSold  Int?
+  occupancy  Float?    // 0..100 (%)
+  revenue    Int?
+  rate       Int?      // average rate for the year
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
