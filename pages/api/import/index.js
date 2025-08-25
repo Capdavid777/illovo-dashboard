@@ -8,24 +8,30 @@ export const config = {
   runtime: 'nodejs',
 };
 
+// Reuse Prisma in dev
 let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-// ---- helpers ----
+// ---------- helpers ----------
 const toNum = (v) => {
+  if (v === '' || v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
 
-// Excel often stores 57% as 0.57. We want 57.0 in DB.
-const normalizeOccupancyToPercent = (v) => {
-  if (v == null || v === '') return null;
+// Excel often stores 57% as 0.57 (with % formatting). Store percent in DB.
+const normalizeOccupancyToPercent = (v, sold, available) => {
+  // If no explicit v but we have sold/available, derive it
+  if ((v === '' || v == null) && Number.isFinite(sold) && Number.isFinite(available) && available > 0) {
+    return Math.round((sold / available) * 1000) / 10; // 1 decimal
+  }
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
-  return n <= 1 ? +(n * 100).toFixed(1) : +n.toFixed(1);
+  const pct = n <= 1 ? n * 100 : n;
+  return Math.round(pct * 10) / 10;
 };
 
-// Accept ISO/Date/Excel-serial or day number (with given year/month)
+// Parse Excel serial or arbitrary date-ish into UTC midnight
 function toUtcMidnightDate(cell, year, month) {
   if (cell == null || cell === '') return null;
 
@@ -44,16 +50,41 @@ function toUtcMidnightDate(cell, year, month) {
   return null;
 }
 
-// case-insensitive header pick
+// Case-insensitive header read
 const pick = (obj, keys) => {
+  if (!obj) return null;
   for (const k of keys) if (obj[k] != null) return obj[k];
   const lower = Object.fromEntries(Object.entries(obj).map(([k, v]) => [String(k).toLowerCase(), v]));
-  for (const k of keys.map(String).map((s) => s.toLowerCase())) {
-    if (lower[k] != null) return lower[k];
+  for (const k of keys.map(String).map((s) => s.toLowerCase())) if (lower[k] != null) return lower[k];
+  return null;
+};
+
+// Read sheet to JSON with blanks preserved
+const readSheet = (wb, nameOrIndex = 0) => {
+  const sheetName = typeof nameOrIndex === 'number' ? wb.SheetNames[nameOrIndex] : nameOrIndex;
+  if (!sheetName) return [];
+  const ws = wb.Sheets[sheetName];
+  if (!ws) return [];
+  return XLSX.utils.sheet_to_json(ws, { raw: true, defval: null, blankrows: false });
+};
+
+// Find a sheet by exact or loose name (e.g. "Room Types" / "RoomTypes")
+const findRoomTypeSheetName = (wb) => {
+  const names = wb.SheetNames || [];
+  const wanted = ['room types', 'roomtypes'];
+  for (const n of names) {
+    const nm = String(n).trim().toLowerCase();
+    if (wanted.includes(nm)) return n;              // exact
+  }
+  // loose contains
+  for (const n of names) {
+    const nm = String(n).trim().toLowerCase();
+    if (nm.includes('room') && nm.includes('type')) return n;
   }
   return null;
 };
 
+// ---------- main handler ----------
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -61,10 +92,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Parse multipart form
+    // Parse form
     const { fields, files } = await new Promise((resolve, reject) => {
       const form = formidable({ multiples: false, keepExtensions: true });
-      form.parse(req, (err, fields, files) => (err ? reject(err) : resolve({ fields, files })));
+      form.parse(req, (err, f, fl) => (err ? reject(err) : resolve({ fields: f, files: fl })));
     });
 
     const year  = Number(Array.isArray(fields.year)  ? fields.year[0]  : fields.year);
@@ -76,86 +107,76 @@ export default async function handler(req, res) {
     // Read workbook
     const wb = XLSX.readFile(filePath);
 
-    // ---------- SHEET 1: Daily totals (DailyMetric) ----------
-    {
-      const sheetName = wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
-      const rawRows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: null, blankrows: false });
+    // -------- Overview (sheet 1) -> DailyMetric --------
+    const overviewRows = readSheet(wb, 0);
+    const dailyRecords = [];
+    for (const r of overviewRows) {
+      const dateCell = pick(r, ['Date', 'date', 'Day', 'day']);
+      const date = toUtcMidnightDate(dateCell, year, month);
+      if (!date) continue;
 
-      const records = [];
-      for (const r of rawRows) {
-        const dateCell = pick(r, ['Date', 'date', 'Day', 'day']);
-        const date = toUtcMidnightDate(dateCell, year, month);
-        if (!date) continue;
+      const revenue   = toNum(pick(r, ['Revenue', 'revenue']));
+      const target    = toNum(pick(r, ['Target', 'target']));
+      const arr       = toNum(pick(r, ['ARR', 'arr', 'Rate', 'rate']));
+      const occRaw    = pick(r, ['Occupancy', 'occupancy', 'Occ', 'occ', 'Occ %', 'Occupancy %']);
+      const occupancy = normalizeOccupancyToPercent(occRaw, null, null);
 
-        const revenue   = toNum(pick(r, ['Revenue', 'revenue']));
-        const target    = toNum(pick(r, ['Target', 'target']));
-        const arr       = toNum(pick(r, ['ARR', 'arr', 'Rate', 'rate']));
-        const occRaw    = pick(r, ['Occupancy', 'occupancy', 'Occ', 'occ', 'Occ %', 'Occupancy %']);
-        const occupancy = normalizeOccupancyToPercent(occRaw);
-
-        records.push({ date, revenue, target, arr, occupancy });
-      }
-
-      await Promise.all(
-        records.map((row) =>
-          prisma.dailyMetric.upsert({
-            where: { date: row.date },
-            update: { revenue: row.revenue, target: row.target, arr: row.arr, occupancy: row.occupancy },
-            create: { date: row.date, revenue: row.revenue, target: row.target, arr: row.arr, occupancy: row.occupancy },
-          })
-        )
-      );
+      dailyRecords.push({ date, revenue, target, arr, occupancy });
     }
 
-    // ---------- SHEET 2 (optional): Room Types ----------
-    // We’ll look for a sheet whose name contains “type” OR use the second sheet if present.
-    const roomTypeSheetName =
-      wb.SheetNames.find((n) => /type/i.test(n)) || (wb.SheetNames.length > 1 ? wb.SheetNames[1] : null);
+    const dailyResult = await Promise.all(
+      dailyRecords.map((row) =>
+        prisma.dailyMetric.upsert({
+          where: { date: row.date },
+          update: { revenue: row.revenue, target: row.target, arr: row.arr, occupancy: row.occupancy },
+          create: { date: row.date, revenue: row.revenue, target: row.target, arr: row.arr, occupancy: row.occupancy },
+        })
+      )
+    );
 
-    if (roomTypeSheetName) {
-      const ws2 = wb.Sheets[roomTypeSheetName];
-      const rows = XLSX.utils.sheet_to_json(ws2, { raw: true, defval: null, blankrows: false });
+    // -------- Room Types (optional sheet) -> RoomType + RoomTypeDaily --------
+    let roomTypeUpserts = 0;
+    const rtSheetName = findRoomTypeSheetName(wb);
+    if (rtSheetName) {
+      const rtRows = readSheet(wb, rtSheetName);
 
-      const rtRecords = [];
-      for (const r of rows) {
+      for (const r of rtRows) {
         const dateCell = pick(r, ['Date', 'date', 'Day', 'day']);
         const date = toUtcMidnightDate(dateCell, year, month);
-        if (!date) continue;
+        const typeName = String(pick(r, ['Type', 'type', 'Room Type', 'room type'])).trim();
+        if (!date || !typeName) continue;
 
-        const type      = (pick(r, ['Type', 'type', 'Room Type', 'Room']) || '').toString().trim();
-        if (!type) continue;
+        // Resolve or create the RoomType
+        const type = await prisma.roomType.upsert({
+          where: { name: typeName },
+          update: {},
+          create: { name: typeName },
+        });
 
-        const rooms     = toNum(pick(r, ['Rooms', 'rooms']));
-        const available = toNum(pick(r, ['Available', 'available']));
-        const sold      = toNum(pick(r, ['Sold', 'sold']));
-        const revenue   = toNum(pick(r, ['Revenue', 'revenue']));
-        const rate      = toNum(pick(r, ['Rate', 'rate', 'ARR', 'arr']));
-        const occRaw    = pick(r, ['Occupancy', 'occupancy', 'Occ %', 'Occupancy %', 'Occ']);
-        const occupancy = normalizeOccupancyToPercent(occRaw);
+        const rooms      = toNum(pick(r, ['Rooms', 'rooms']));
+        const available  = toNum(pick(r, ['Available', 'available', 'Avail', 'avail']));
+        const sold       = toNum(pick(r, ['Sold', 'sold', 'Room Nights', 'room nights']));
+        const revenue    = toNum(pick(r, ['Revenue', 'revenue']));
+        const rate       = toNum(pick(r, ['Rate', 'rate', 'ARR', 'arr']));
+        const occRaw     = pick(r, ['Occupancy', 'occupancy', 'Occ %', 'Occ', 'occ']);
+        const occupancy  = normalizeOccupancyToPercent(occRaw, sold ?? undefined, available ?? undefined);
 
-        rtRecords.push({ date, type, rooms, available, sold, revenue, rate, occupancy });
+        await prisma.roomTypeDaily.upsert({
+          where: { roomTypeId_date: { roomTypeId: type.id, date } },
+          update: { rooms, available, sold, revenue, rate, occupancy },
+          create: { roomTypeId: type.id, date, rooms, available, sold, revenue, rate, occupancy },
+        });
+
+        roomTypeUpserts++;
       }
-
-      await Promise.all(
-        rtRecords.map((row) =>
-          prisma.roomTypeMetric.upsert({
-            where: { date_type: { date: row.date, type: row.type } }, // Prisma will create this from @@unique([date, type])
-            update: {
-              rooms: row.rooms, available: row.available, sold: row.sold,
-              revenue: row.revenue, rate: row.rate, occupancy: row.occupancy,
-            },
-            create: {
-              date: row.date, type: row.type,
-              rooms: row.rooms, available: row.available, sold: row.sold,
-              revenue: row.revenue, rate: row.rate, occupancy: row.occupancy,
-            },
-          })
-        )
-      );
     }
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      importedOverviewDays: dailyResult.length,
+      importedRoomTypeRows: roomTypeUpserts,
+      note: rtSheetName ? `Room types sheet used: "${rtSheetName}"` : 'No room types sheet found',
+    });
   } catch (err) {
     console.error('IMPORT ERROR:', err);
     return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
