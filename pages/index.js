@@ -7,7 +7,11 @@ function Home({ overview }) {
   const { user, isLoading } = useUser();
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
   }
 
   return (
@@ -24,7 +28,7 @@ function Home({ overview }) {
         </div>
       </div>
 
-      {/* Dashboard (SSR data includes .roomTypes now) */}
+      {/* Dashboard (SSR data includes .roomTypes) */}
       <Dashboard overview={overview} />
     </div>
   );
@@ -32,28 +36,44 @@ function Home({ overview }) {
 
 export default withPageAuthRequired(Home);
 
-// This runs on every request (no cache) and now returns roomTypes too
+// --- SSR: fetch fresh data on every request (no cache) ---
 export async function getServerSideProps(ctx) {
   try {
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      'https://illovo-dashboard.vercel.app';
+    // Prefer explicit base URL if provided, else infer from the incoming request.
+    const baseEnv = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+    const proto =
+      ctx.req.headers['x-forwarded-proto']?.toString() ||
+      (ctx.req.headers.host?.startsWith('localhost') ? 'http' : 'https');
+    const host =
+      ctx.req.headers['x-forwarded-host']?.toString() ||
+      ctx.req.headers.host?.toString();
+    const base = baseEnv || `${proto}://${host}`;
 
     const res = await fetch(`${base}/api/overview`, {
       cache: 'no-store',
-      headers: { 'x-no-cache': Date.now().toString() },
+      headers: {
+        // tiny cache-buster for any proxy layer that might still try to cache
+        'x-no-cache': String(Date.now()),
+        'accept': 'application/json',
+      },
     });
 
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
 
-    // prevent CDN/proxy caching of the page
+    // Prevent page caching by CDNs/proxies
     ctx.res.setHeader(
       'Cache-Control',
       'no-store, no-cache, must-revalidate, proxy-revalidate'
     );
 
-    return { props: { overview: data ?? null } };
-  } catch (e) {
-    return { props: { overview: null, error: 'fetch-failed' } };
+    return { props: { overview: data } };
+  } catch (_err) {
+    // Fail safe: render the shell; components handle missing data gracefully
+    return { props: { overview: null } };
   }
 }
