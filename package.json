@@ -2,9 +2,9 @@
   "name": "illovo-dashboard",
   "version": "0.1.0",
   "private": true,
-
-  "prisma": { "schema": "prisma/schema.prisma" },
-
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,15 +12,16 @@
     "vercel-build": "npx prisma generate --schema=./prisma/schema.prisma && npx prisma migrate deploy --schema=./prisma/schema.prisma && next build",
     "postinstall": "npx prisma generate --schema=./prisma/schema.prisma"
   },
-
-"dependencies": {
+  "dependencies": {
     "@auth0/nextjs-auth0": "3.8.0",
     "@prisma/client": "^5.18.0",
+    "formidable": "^3.5.4",
     "lucide-react": "0.263.1",
     "next": "14.2.32",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "recharts": "2.8.0"
+    "recharts": "2.8.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "autoprefixer": "10.4.20",
