@@ -1,19 +1,36 @@
 // pages/api/overview/index.js
 import { PrismaClient } from '@prisma/client';
 
+// Node runtime on Vercel
 export const config = { runtime: 'nodejs' };
 
+// Reuse Prisma client in dev
 let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
-const endOfToday   = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+// ---- helpers ---------------------------------------------------------------
 
+const toNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const startOfMonthUTC = (d = new Date()) =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+
+const endOfTodayUTC = (d = new Date()) =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+
+// Convert 0..1 style to percent if needed
 const normalizePct = (n) => {
   if (!Number.isFinite(n)) return 0;
   return n <= 1.5 ? n * 100 : n;
 };
+
+// Round to 1 decimal place
+const r1 = (n) => Math.round(n * 10) / 10;
+
+// ---- handler ---------------------------------------------------------------
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -27,10 +44,10 @@ export default async function handler(req, res) {
   res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 
   try {
-    const from = startOfMonth();
-    const to   = endOfToday();
+    const from = startOfMonthUTC();
+    const to   = endOfTodayUTC();
 
-    // ----- Daily totals for Overview -----
+    /* -------------------- DAILY (Overview) -------------------- */
     const rows = await prisma.dailyMetric.findMany({
       where: { date: { gte: from, lte: to } },
       orderBy: { date: 'asc' },
@@ -38,6 +55,7 @@ export default async function handler(req, res) {
     });
 
     let revenueSum = 0, targetSum = 0, arrSum = 0, arrCount = 0, occSum = 0, occCount = 0;
+
     const dailySeries = rows.map((r) => {
       const rev = toNum(r.revenue);
       const tgt = toNum(r.target);
@@ -54,27 +72,32 @@ export default async function handler(req, res) {
         date: r.date.toISOString(),
         revenue: rev,
         target: tgt,
-        occupancy: Number.isFinite(occ) ? Math.round(occ * 10) / 10 : 0,
+        occupancy: Number.isFinite(occ) ? r1(occ) : 0,
         rate: Number.isFinite(arr) ? Math.round(arr) : 0,
       };
     });
 
     const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
-    const occupancyRate   = occCount ? Math.round((occSum / occCount) * 10) / 10 : 0;
+    const occupancyRate   = occCount ? r1(occSum / occCount) : 0;
     const targetVariance  = targetSum - revenueSum;
     const latest          = rows[rows.length - 1];
     const lastUpdated     = latest ? (latest.updatedAt || latest.createdAt || latest.date).toISOString() : null;
 
-    // ----- Room Types (month-to-date, grouped by type) -----
+    /* -------------------- ROOM TYPES (month-to-date) -------------------- */
     const rts = await prisma.roomTypeMetric.findMany({
       where: { date: { gte: from, lte: to } },
+      orderBy: [{ type: 'asc' }, { date: 'asc' }],
       select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
     });
 
     const byType = new Map();
     for (const rt of rts) {
       const key = rt.type || 'Unknown';
-      const acc = byType.get(key) || { type: key, available: 0, sold: 0, revenue: 0, rateSum: 0, rateCount: 0, occSum: 0, occCount: 0 };
+      const acc = byType.get(key) || {
+        type: key, available: 0, sold: 0, revenue: 0,
+        rateSum: 0, rateCount: 0, occSum: 0, occCount: 0,
+      };
+
       acc.available += toNum(rt.available);
       acc.sold      += toNum(rt.sold);
       acc.revenue   += toNum(rt.revenue);
@@ -89,9 +112,9 @@ export default async function handler(req, res) {
     }
 
     const roomTypes = Array.from(byType.values()).map((t) => {
-      const rateFromAvg = t.rateCount ? t.rateSum / t.rateCount : 0;
-      const rateFromRev = t.sold ? t.revenue / t.sold : 0;
-      const avgRate     = Math.round((rateFromAvg || rateFromRev) || 0);
+      const rateFromAvg = t.rateCount ? t.rateSum / t.rateCount : NaN;
+      const rateFromRev = t.sold ? t.revenue / t.sold : NaN;
+      const avgRate     = Math.round(Number.isFinite(rateFromAvg) ? rateFromAvg : (Number.isFinite(rateFromRev) ? rateFromRev : 0));
 
       const occFromAvg  = t.occCount ? (t.occSum / t.occCount) : NaN;
       const occFromCalc = t.available ? (t.sold / t.available) * 100 : NaN;
@@ -103,7 +126,7 @@ export default async function handler(req, res) {
         sold: t.sold,
         revenue: t.revenue,
         rate: avgRate,
-        occupancy: Math.round(occPct * 10) / 10,
+        occupancy: r1(occPct),
       };
     });
 
