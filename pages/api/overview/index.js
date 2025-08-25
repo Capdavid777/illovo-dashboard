@@ -1,9 +1,10 @@
 // pages/api/overview/index.js
 import { PrismaClient } from '@prisma/client';
 
+// Prisma on Vercel -> Node runtime
 export const config = { runtime: 'nodejs' };
 
-// Reuse Prisma in dev
+// Reuse Prisma across hot reloads in dev
 let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
@@ -11,14 +12,6 @@ const toNum = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
-
-// Convert 0..1 to 0..100, pass through >=1 as already-percent
-const toPercent = (v) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return n <= 1 ? n * 100 : n;
-};
-
 const startOfMonth = (d = new Date()) =>
   new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
 const endOfToday = (d = new Date()) =>
@@ -30,7 +23,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
   }
 
-  // never cache this response
+  // absolutely no cache (SSR already uses no-store, but belt & braces)
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('CDN-Cache-Control', 'no-store');
   res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
@@ -47,7 +40,7 @@ export default async function handler(req, res) {
         date: true,
         revenue: true,
         target: true,
-        occupancy: true, // stored as 0..1 (fraction) or 0..100 (percent)
+        occupancy: true, // may be 0..1 or 0..100
         arr: true,
         createdAt: true,
         updatedAt: true,
@@ -61,7 +54,7 @@ export default async function handler(req, res) {
         targetToDate: 0,
         avgRoomRate: 0,
         averageRoomRate: 0,
-        occupancyRate: 0,       // percent
+        occupancyRate: 0,
         targetVariance: 0,
         lastUpdated: null,
         dailySeries: [],
@@ -78,41 +71,49 @@ export default async function handler(req, res) {
 
     let revenueSum = 0;
     let targetSum = 0;
+    let arrSum = 0,
+      arrCount = 0;
 
-    // ARR and occupancy are averaged (ARR simple mean; occupancy mean then converted to %)
-    let arrSum = 0, arrCount = 0;
-    const occVals = []; // collect to average
+    // IMPORTANT: normalize **each row's** occupancy to a percent (0–100) before averaging
+    let occPctSum = 0,
+      occCount = 0;
 
-    for (const r of rows) {
+    const dailySeries = rows.map((r) => {
+      // revenue/target/arr aggregates
       revenueSum += toNum(r.revenue);
-      targetSum  += toNum(r.target);
+      targetSum += toNum(r.target);
+      if (r.arr != null) {
+        arrSum += toNum(r.arr);
+        arrCount++;
+      }
 
-      if (r.arr != null) { arrSum += toNum(r.arr); arrCount++; }
-      if (r.occupancy != null) { occVals.push(toNum(r.occupancy)); }
-    }
+      // occupancy normalization (fraction -> percent)
+      let occPct = null;
+      if (r.occupancy != null) {
+        const raw = Number(r.occupancy);
+        if (Number.isFinite(raw)) {
+          occPct = raw <= 1 ? raw * 100 : raw; // 0.57 => 57 ; 57 => 57
+          occPctSum += occPct;
+          occCount++;
+        }
+      }
+
+      return {
+        day: new Date(r.date).getDate(),
+        date: r.date instanceof Date ? r.date.toISOString() : r.date,
+        revenue: toNum(r.revenue),
+        target: toNum(r.target),
+        occupancy: occPct ?? null, // expose percent to charts
+        rate: toNum(r.arr),
+      };
+    });
 
     const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
-
-    // Average in the **stored units**, then convert to percent for output
-    const occAvgRaw = occVals.length
-      ? occVals.reduce((a, b) => a + b, 0) / occVals.length
-      : 0;
-    const occupancyRate = +toPercent(occAvgRaw).toFixed(1); // always a percent (e.g. 46.2)
-
+    const occupancyRate = occCount ? +((occPctSum / occCount).toFixed(1)) : 0; // percent, 1 decimal
     const targetVariance = targetSum - revenueSum;
 
     const latest = rows[rows.length - 1];
     const lastUpdated = (latest.updatedAt || latest.createdAt || latest.date);
-
-    const dailySeries = rows.map((r) => ({
-      day: new Date(r.date).getDate(),
-      date: r.date instanceof Date ? r.date.toISOString() : r.date,
-      revenue: toNum(r.revenue),
-      target: toNum(r.target),
-      // Important: emit percent for charts/tiles
-      occupancy: r.occupancy == null ? null : +toPercent(r.occupancy).toFixed(1),
-      rate: toNum(r.arr),
-    }));
 
     return res.status(200).json({
       ok: true,
@@ -120,11 +121,12 @@ export default async function handler(req, res) {
       targetToDate: targetSum,
       avgRoomRate: averageRoomRate,
       averageRoomRate,
-      occupancyRate,              // <- percent
+      occupancyRate, // <- now a true percent
       targetVariance,
       lastUpdated: lastUpdated instanceof Date ? lastUpdated.toISOString() : lastUpdated,
       dailySeries,
       items: rows,
+
       totals: {
         revenueToDate: revenueSum,
         targetToDate: targetSum,
@@ -135,6 +137,7 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('GET /api/overview error:', err);
+    // do not crash the page; return a safe object
     return res.status(200).json({ ok: false, error: 'INTERNAL_ERROR' });
   }
 }
