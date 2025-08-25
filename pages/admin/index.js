@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';            // <-- add this
 
 // helper: format YYYY-MM-DD for <input type="date">
 function isoDate(d = new Date()) {
@@ -62,7 +63,6 @@ export default function AdminPage() {
         throw new Error(j.error || 'Save failed');
       }
 
-      // reload table
       await load();
     } catch (err) {
       console.error(err);
@@ -72,7 +72,14 @@ export default function AdminPage() {
 
   return (
     <main>
-      <h1>Admin — Daily Updates</h1>
+      <div className="toolbar">
+        <h1>Admin — Daily Updates</h1>
+
+        {/* <-- THIS is the button */}
+        <Link href="/admin/import" className="upload-btn">
+          Upload report
+        </Link>
+      </div>
 
       <section className="form">
         <form onSubmit={onSubmit}>
@@ -199,7 +206,7 @@ export default function AdminPage() {
   );
 }
 
-/** STEP 2 styling (CSS-in-JS) */
+/** styling (CSS-in-JS) */
 function Styles() {
   return (
     <style jsx global>{`
@@ -230,14 +237,26 @@ function Styles() {
         background: var(--card);
       }
 
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .upload-btn {
+        background: transparent;
+        color: var(--link);
+        text-decoration: underline;
+        font-size: 14px;
+      }
+
       h1 {
         font-size: 22px;
         margin: 0 0 16px;
       }
 
-      .form {
-        margin-top: 8px;
-      }
+      .form { margin-top: 8px; }
 
       .row {
         display: grid;
@@ -245,10 +264,7 @@ function Styles() {
         gap: 16px;
       }
 
-      .row > div {
-        display: flex;
-        flex-direction: column;
-      }
+      .row > div { display: flex; flex-direction: column; }
 
       label {
         font-size: 13px;
@@ -268,14 +284,9 @@ function Styles() {
         outline: none;
       }
 
-      textarea {
-        min-height: 90px;
-        resize: vertical;
-      }
+      textarea { min-height: 90px; resize: vertical; }
 
-      .actions {
-        margin-top: 12px;
-      }
+      .actions { margin-top: 12px; }
 
       button {
         background: var(--accent);
@@ -286,16 +297,9 @@ function Styles() {
         font-weight: 600;
         cursor: pointer;
       }
+      button:hover { filter: brightness(1.07); }
 
-      button:hover {
-        filter: brightness(1.07);
-      }
-
-      .error {
-        margin-left: 12px;
-        color: #f87171;
-        font-size: 13px;
-      }
+      .error { margin-left: 12px; color: #f87171; font-size: 13px; }
 
       .list {
         margin-top: 28px;
@@ -312,19 +316,10 @@ function Styles() {
         margin-bottom: 10px;
       }
 
-      .list a {
-        color: var(--link);
-        text-decoration: underline;
-        font-size: 14px;
-      }
+      .list a { color: var(--link); text-decoration: underline; font-size: 14px; }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      th,
-      td {
+      table { width: 100%; border-collapse: collapse; }
+      th, td {
         text-align: left;
         padding: 10px 12px;
         border-bottom: 1px solid var(--line);
@@ -332,13 +327,8 @@ function Styles() {
       }
 
       @media (max-width: 640px) {
-        main {
-          margin: 12px;
-          padding: 16px;
-        }
-        .row {
-          grid-template-columns: 1fr;
-        }
+        main { margin: 12px; padding: 16px; }
+        .row { grid-template-columns: 1fr; }
       }
     `}</style>
   );
