@@ -1,237 +1,168 @@
 // pages/api/import/index.js
-import fs from "node:fs";
-import path from "node:path";
-import formidable from "formidable";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from '@prisma/client';
+import formidable from 'formidable';
+import { readFile } from 'fs/promises';
+import * as XLSX from 'xlsx';
 
-// IMPORTANT: this API must run on Node (not Edge) and we disable Next's body parser
+// Required for file upload parsing on Next.js API routes
 export const config = {
   api: { bodyParser: false },
-  runtime: "nodejs",
+  runtime: 'nodejs',
 };
 
-// Reuse Prisma in dev
+// reuse prisma in dev
 let prisma = globalThis.__prisma || new PrismaClient();
-if (process.env.NODE_ENV !== "production") globalThis.__prisma = prisma;
+if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-// ---- small helpers ---------------------------------------------------------
-const toNum = (v) => {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  const s = String(v).replace(/[, ]/g, ""); // remove commas/spaces
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-};
-
-const startOfUTC = (y, m /*1-12*/, d) => new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
-
-function normaliseKey(k) {
-  return String(k || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[^a-z0-9 %/()-]/g, "");
+function parseForm(req) {
+  const form = formidable({ multiples: false, keepExtensions: true });
+  return new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => (err ? reject(err) : resolve({ fields, files })));
+  });
 }
 
-// Accepts:
-//  - rows with a "date" (Date or string) OR
-//  - rows with "day" (1..31) + year/month from the form
-function extractRow(row, year, month) {
-  const obj = {};
-  for (const [k, v] of Object.entries(row)) {
-    obj[normaliseKey(k)] = v;
-  }
+// try several common header names
+function firstFile(files) {
+  const candidate = files.file ?? files.report ?? files.upload ?? files.data;
+  return Array.isArray(candidate) ? candidate[0] : candidate;
+}
 
-  // map likely headers to canonical fields
-  const dayVal =
-    obj["day"] ??
-    obj["date"] ??
-    obj["day of month"] ??
-    obj["day-of-month"] ??
-    obj["d"];
+const toNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
-  const revenueVal =
-    obj["revenue"] ??
-    obj["revenue (r)"] ??
-    obj["rev"] ??
-    obj["actual revenue"];
+function parseDateCell(value, year, month /* 1-12 */) {
+  if (!value) return null;
 
-  const targetVal =
-    obj["target"] ??
-    obj["target (r)"] ??
-    obj["target revenue"] ??
-    obj["daily target"] ??
-    obj["budget"];
+  // CSV date string?
+  if (typeof value === 'string') {
+    // Try ISO / dd/mm/yyyy / yyyy-mm-dd
+    const t = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return new Date(t + 'T00:00:00Z');
 
-  const occVal =
-    obj["occupancy"] ??
-    obj["occupancy (%)"] ??
-    obj["occ"] ??
-    obj["occ (%)"];
-
-  const arrVal =
-    obj["arr"] ??
-    obj["average room rate"] ??
-    obj["avg rate"] ??
-    obj["rate"];
-
-  // date: try to parse. If only a day is present, build with provided year/month
-  let date = null;
-
-  if (dayVal instanceof Date) {
-    // excel date parsed by xlsx can already be Date
-    date = startOfUTC(dayVal.getUTCFullYear(), dayVal.getUTCMonth() + 1, dayVal.getUTCDate());
-  } else if (typeof dayVal === "number") {
-    date = startOfUTC(year, month, dayVal);
-  } else if (typeof dayVal === "string" && dayVal.trim()) {
-    // try several formats
-    const s = dayVal.trim();
-    // dd/mm or dd-mm
-    const m1 = s.match(/^(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?$/);
-    if (m1) {
-      const d = Number(m1[1]);
-      const mm = Number(m1[2]);
-      const yy = m1[3] ? Number(m1[3]) : year;
-      const fullYear = yy < 100 ? 2000 + yy : yy;
-      date = startOfUTC(fullYear, mm, d);
-    } else {
-      // ISO-ish
-      const d = new Date(s);
-      if (!isNaN(d.valueOf())) {
-        date = startOfUTC(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
-      }
+    const m = t.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+    if (m) {
+      const [ , d, mo, y ] = m.map(Number);
+      const yy = y < 100 ? 2000 + y : y;
+      return new Date(Date.UTC(yy, mo - 1, d));
     }
   }
 
-  // If nothing parseable, but we have year/month and a numeric `obj["day"]`
-  if (!date && obj["day"] != null) {
-    const d = toNum(obj["day"]);
-    if (d != null) date = startOfUTC(year, month, d);
+  // Excel serial?
+  if (typeof value === 'number') {
+    const t = XLSX.SSF.parse_date_code(value);
+    if (t) return new Date(Date.UTC(t.y, (t.m || month) - 1, t.d));
   }
 
-  return {
-    date,
-    revenue: toNum(revenueVal),
-    target: toNum(targetVal),
-    occupancy: toNum(occVal), // store as 0–100 if that's how your DB is
-    arr: toNum(arrVal),
-  };
+  // Fallback: assume "day of month"
+  const d = Number(value);
+  if (Number.isFinite(d) && d >= 1 && d <= 31) {
+    return new Date(Date.UTC(year, month - 1, d));
+  }
+  return null;
 }
 
-// parse multipart form (file + fields)
-function parseForm(req) {
-  const uploadDir = path.join(process.cwd(), ".tmp");
-  fs.mkdirSync(uploadDir, { recursive: true });
-
-  const form = formidable({
-    multiples: false,
-    uploadDir,
-    keepExtensions: true,
-    maxFileSize: 20 * 1024 * 1024, // 20MB
-  });
-
-  return new Promise((resolve, reject) => {
-    form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
-      resolve({ fields, files });
-    });
+async function upsertDailyMetric(row) {
+  const { date, revenue, target, occupancy, arr, notes } = row;
+  return prisma.dailyMetric.upsert({
+    where: { date },
+    create: { date, revenue, target, occupancy, arr, notes },
+    update: { revenue, target, occupancy, arr, notes },
   });
 }
 
-// ---- main handler ----------------------------------------------------------
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ ok: false, error: "METHOD_NOT_ALLOWED" });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
   }
-
-  // absolutely no cache
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
 
   try {
     const { fields, files } = await parseForm(req);
 
-    // form inputs from /admin/import
-    const year = Number(fields.year ?? fields.Y ?? fields.y);
-    const month = Number(fields.month ?? fields.M ?? fields.m);
+    // support both array/object shape and different field names
+    const f = firstFile(files);
+    if (!f) return res.status(400).json({ ok: false, error: 'MISSING_FILE' });
 
-    if (!year || !month) {
-      return res.status(400).json({ ok: false, error: "Missing year/month" });
-    }
+    const year  = Number(fields.year ?? new Date().getFullYear());
+    const month = Number(fields.month ?? (new Date().getMonth() + 1)); // 1..12
 
-    // accept name="file" or name="report"
-    const file =
-      files.file ||
-      files.report ||
-      files.upload ||
-      Object.values(files)[0];
+    const filePath = f.filepath || f.path; // formidable v3 vs v2
+    const buf = await readFile(filePath);
 
-    if (!file) {
-      return res.status(400).json({ ok: false, error: "No file uploaded" });
-    }
-
-    const filepath = file.filepath || file.path; // formidable v3 vs v2
-    const ext = (file.originalFilename || file.newFilename || "").toLowerCase();
-
-    // Read rows (XLSX or CSV)
     let rows = [];
-    if (ext.endsWith(".csv")) {
-      const raw = fs.readFileSync(filepath, "utf8");
-      const lines = raw.split(/\r?\n/).filter(Boolean);
-      const header = (lines.shift() || "").split(",").map((h) => h.trim());
+
+    if ((f.originalFilename || f.newFilename || '').toLowerCase().endsWith('.csv')) {
+      // CSV
+      const text = buf.toString('utf8');
+      // very simple CSV splitter; use a real parser if needed
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      const header = lines.shift();
+      const cols = header.split(',').map(s => s.trim().toLowerCase());
+
+      const idx = (name) => cols.findIndex(c => c.includes(name));
+      const iDate = idx('date');
+      const iDay  = iDate === -1 ? idx('day') : -1;
+      const iRev  = idx('revenue');
+      const iTgt  = idx('target');
+      const iOcc  = idx('occup');
+      const iArr  = idx('arr');
+      const iNote = idx('note');
+
       for (const line of lines) {
-        const parts = line.split(",");
-        const row = {};
-        header.forEach((h, i) => (row[h] = parts[i]));
-        rows.push(row);
+        const a = line.split(',');
+        const raw = (iDate !== -1 ? a[iDate] : (iDay !== -1 ? a[iDay] : null));
+        const date = parseDateCell(raw, year, month);
+        if (!date) continue;
+
+        rows.push({
+          date,
+          revenue: toNum(a[iRev]),
+          target: toNum(a[iTgt]),
+          occupancy: toNum(a[iOcc]), // store as percent, e.g. 46
+          arr: toNum(a[iArr]),
+          notes: iNote !== -1 ? a[iNote] : null,
+        });
       }
     } else {
       // XLSX
-      // use dynamic import to avoid ESM bundling issues in Next
-      const XLSX = (await import("xlsx")).default || (await import("xlsx"));
-      const buf = fs.readFileSync(filepath);
-      const wb = XLSX.read(buf, { type: "buffer" });
+      const wb = XLSX.read(buf, { type: 'buffer' });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
+      const json = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+      // Heuristics: map common headings
+      for (const r of json) {
+        const raw =
+          r.date ?? r.Date ?? r.DAY ?? r.Day ?? r['Day '] ?? r.D ??
+          r['day of month'] ?? r['day'];
+
+        const date = parseDateCell(raw, year, month);
+        if (!date) continue;
+
+        const revenue   = toNum(r.revenue ?? r.Revenue ?? r.Turnover ?? r['Daily Revenue']);
+        const target    = toNum(r.target ?? r.Target ?? r['Daily Target']);
+        const occupancy = toNum(r.occupancy ?? r.Occupancy ?? r['Occ %'] ?? r['Occupancy %']);
+        const arr       = toNum(r.arr ?? r.ARR ?? r['Average Room Rate'] ?? r['Avg Rate']);
+        const notes     = r.notes ?? r.Notes ?? null;
+
+        rows.push({ date, revenue, target, occupancy, arr, notes });
+      }
     }
 
-    // Map & validate
-    const mapped = rows
-      .map((r) => extractRow(r, year, month))
-      .filter((r) => r.date instanceof Date && !isNaN(r.date.valueOf()));
-
-    if (!mapped.length) {
-      return res.status(200).json({ ok: true, imported: 0, skipped: rows.length });
-    }
-
-    // Upsert into DB by unique date
+    // upsert rows
     let imported = 0;
-    for (const r of mapped) {
-      await prisma.dailyMetric.upsert({
-        where: { date: r.date },
-        update: {
-          revenue: r.revenue,
-          target: r.target,
-          occupancy: r.occupancy,
-          arr: r.arr,
-        },
-        create: {
-          date: r.date,
-          revenue: r.revenue,
-          target: r.target,
-          occupancy: r.occupancy,
-          arr: r.arr,
-        },
-      });
-      imported += 1;
+    for (const row of rows) {
+      await upsertDailyMetric(row);
+      imported++;
     }
 
-    // cleanup temp file
-    try { fs.unlinkSync(filepath); } catch {}
+    // kill all caches
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
 
-    return res.status(200).json({ ok: true, imported, skipped: rows.length - imported });
+    return res.status(200).json({ ok: true, imported });
   } catch (err) {
-    console.error("IMPORT ERROR:", err);
-    return res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
+    console.error('import error:', err);
+    return res.status(500).json({ ok: false, error: 'IMPORT_FAILED' });
   }
 }

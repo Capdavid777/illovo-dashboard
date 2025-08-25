@@ -1,100 +1,77 @@
-// pages/admin/import.js
 'use client';
-import { useState } from 'react';
+
+import React, { useState } from 'react';
 import Link from 'next/link';
 
-export default function ImportPage() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
+export default function AdminImportPage() {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setMsg('');
+
     if (!file) {
-      setMsg('Please choose a .xlsx or .csv file first.');
+      setMsg('Please choose a .xlsx or .csv file.');
       return;
     }
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append('year', String(year));
-      fd.append('month', String(month));
-      fd.append('file', file);
 
-      const resp = await fetch('/api/import-month', {
-        method: 'POST',
-        body: fd,
-      });
+    const fd = new FormData();
+    // IMPORTANT: key name must be 'file'
+    fd.append('file', file);
+    fd.append('year', String(year));
+    fd.append('month', String(month));
 
-      const ct = resp.headers.get('content-type') || '';
-      const data = ct.includes('application/json') ? await resp.json() : { ok: false, error: await resp.text() };
+    const r = await fetch('/api/import', { method: 'POST', body: fd });
+    const j = await r.json();
 
-      if (!resp.ok || data.ok === false) {
-        throw new Error(data?.error || `Upload failed (HTTP ${resp.status})`);
-      }
-
-      setMsg(`Imported ${data.upserts} day(s). Go back to Admin to add more or refresh the dashboard.`);
-    } catch (err) {
-      setMsg(`Error: ${err.message}`);
-    } finally {
-      setBusy(false);
+    if (!r.ok || j.ok === false) {
+      setMsg(`Error: ${j.error || 'UPLOAD_FAILED'}`);
+      return;
     }
+    setMsg(`Imported ${j.imported || 0} day(s). Go back to Admin to verify.`);
   };
 
   return (
-    <main style={{ maxWidth: 700, margin: '24px auto', padding: 24 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <main style={{ maxWidth: 720, margin: '32px auto' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h1>Admin · Import Report</h1>
-        <Link href="/admin" className="text-sm underline">Back to Admin</Link>
+        <Link href="/admin">Back to Admin</Link>
       </header>
 
-      <form onSubmit={onSubmit} style={{ marginTop: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-          <div>
-            <label>Year</label>
-            <input
-              type="number"
-              min="2000"
-              max="2100"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="input"
-            />
-          </div>
-          <div>
-            <label>Month (1–12)</label>
-            <input
-              type="number"
-              min="1"
-              max="12"
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
-              className="input"
-            />
-          </div>
+      <form onSubmit={onSubmit}>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+          <label>
+            Year
+            <input type="number" value={year} onChange={(e) => setYear(+e.target.value)} />
+          </label>
+          <label>
+            Month (1–12)
+            <input type="number" min={1} max={12} value={month} onChange={(e) => setMonth(+e.target.value)} />
+          </label>
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <label>Report file (.xlsx or .csv)</label>
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
+        <div style={{ marginTop: 12 }}>
+          <label>
+            Report file (.xlsx or .csv)
+            {/* IMPORTANT: name="file" */}
+            <input
+              type="file"
+              name="file"
+              accept=".xlsx,.csv"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
         </div>
 
-        <button type="submit" disabled={busy} className="btn">
-          {busy ? 'Uploading…' : 'Upload & Import'}
-        </button>
+        <button type="submit" style={{ marginTop: 12 }}>Upload &amp; Import</button>
 
-        {msg && <p style={{ marginTop: 12, color: msg.startsWith('Error') ? '#dc2626' : '#16a34a' }}>{msg}</p>}
+        {msg && <p style={{ marginTop: 10, color: msg.startsWith('Error') ? '#ef4444' : '#10b981' }}>{msg}</p>}
       </form>
 
-      <style jsx>{`
+	<style jsx>{`
         .input {
           width: 100%;
           padding: 8px 10px;
