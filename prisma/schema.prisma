@@ -1,60 +1,25 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled (for runtime)
-  directUrl = env("DIRECT_URL") // non-pooled (for migrations)
+  url       = env("DATABASE_URL") // pooled (runtime)
+  directUrl = env("DIRECT_URL") // non-pooled (migrations)
 }
 
 model DailyMetric {
   id        Int      @id @default(autoincrement())
-  date      DateTime @unique // <-- add this
-  revenue   Int
-  target    Int
-  occupancy Int
-  arr       Int
-  notes     String?
+  date      DateTime @unique
+  revenue   Int?
+  target    Int?
+  occupancy Float? // store percent number, e.g. 46.0 for 46%
+  arr       Int?
+  notes     String?  @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([date])
 }
-
-model DailyMetric {
-  id         Int       @id @default(autoincrement())
-  date       DateTime  @unique
-  revenue    Int?
-  target     Int?
-  occupancy  Float?    // store as 0..100 (%)
-  arr        Int?      // Average Daily Rate (ZAR)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-}
-
-model RoomTypeMetric {
-  id         Int       @id @default(autoincrement())
-  date       DateTime
-  type       String
-  rooms      Int?
-  available  Int?
-  sold       Int?
-  revenue    Int?
-  rate       Int?
-  occupancy  Float?    // 0..100 (%)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  @@unique([date, type])
-}
-
-model YearlyMetric {
-  id         Int       @id @default(autoincrement())
-  year       Int       @unique
-  roomsSold  Int?
-  occupancy  Float?    // 0..100 (%)
-  revenue    Int?
-  rate       Int?      // average rate for the year
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-}
-
