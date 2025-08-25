@@ -1,13 +1,34 @@
 ﻿'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';            // <-- add this
+import Link from 'next/link';
 
-// helper: format YYYY-MM-DD for <input type="date">
+// ---- helpers ----
+
+// format YYYY-MM-DD for <input type="date">
 function isoDate(d = new Date()) {
   const tzOff = d.getTimezoneOffset();
   const local = new Date(d.getTime() - tzOff * 60_000);
   return local.toISOString().slice(0, 10);
+}
+
+// show a readable date (local YYYY-MM-DD) from ISO/Date
+function fmtDate(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d)) return String(v);
+  const tzOff = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - tzOff * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+// show occupancy as a percentage; handle old fractional rows (e.g. 0.57 -> 57%)
+function fmtOcc(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  const pct = n <= 1 ? n * 100 : n; // old fractional values vs percent values
+  return `${Math.round(pct * 10) / 10}%`;
 }
 
 export default function AdminPage() {
@@ -46,7 +67,7 @@ export default function AdminPage() {
       date, // YYYY-MM-DD
       revenue: revenue === '' ? null : Number(revenue),
       target: target === '' ? null : Number(target),
-      occupancy: occupancy === '' ? null : Number(occupancy),
+      occupancy: occupancy === '' ? null : Number(occupancy), // expected as percent
       arr: arr === '' ? null : Number(arr),
       notes: notes || null,
     };
@@ -75,7 +96,7 @@ export default function AdminPage() {
       <div className="toolbar">
         <h1>Admin — Daily Updates</h1>
 
-        {/* <-- THIS is the button */}
+        {/* Upload button to the import page */}
         <Link href="/admin/import" className="upload-btn">
           Upload report
         </Link>
@@ -124,7 +145,7 @@ export default function AdminPage() {
                 id="occupancy"
                 inputMode="numeric"
                 type="number"
-                step="1"
+                step="0.1"
                 min="0"
                 max="100"
                 placeholder="e.g. 75"
@@ -166,7 +187,7 @@ export default function AdminPage() {
       <section className="list">
         <header>
           <h2>Recent Entries</h2>
-          <a href="#" onClick={(e) => (e.preventDefault(), load())}>
+          <a href="#" onClick={(e) => { e.preventDefault(); load(); }}>
             Refresh
           </a>
         </header>
@@ -188,10 +209,10 @@ export default function AdminPage() {
             <tbody>
               {items.map((row) => (
                 <tr key={row.id ?? row.date}>
-                  <td>{row.date}</td>
+                  <td>{fmtDate(row.date)}</td>
                   <td>{row.revenue ?? '—'}</td>
                   <td>{row.target ?? '—'}</td>
-                  <td>{row.occupancy ?? '—'}</td>
+                  <td>{fmtOcc(row.occupancy)}</td>
                   <td>{row.arr ?? '—'}</td>
                   <td>{row.notes ?? '—'}</td>
                 </tr>
