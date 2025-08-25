@@ -3,27 +3,16 @@ import { PrismaClient } from '@prisma/client';
 
 export const config = { runtime: 'nodejs' };
 
-// Reuse Prisma during dev
 let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-const toNum = (v, d = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
+const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+const endOfToday   = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
 
-const startOfMonthUTC = (d = new Date()) =>
-  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
-const endOfTodayUTC = (d = new Date()) =>
-  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
-
-// normalize a value that might be 0.46 or 46 -> returns percent (e.g., 46.0)
-const toPercent = (v, decimals = 1) => {
-  if (v == null || v === '') return 0;
-  const n = Number(v);
+const normalizePct = (n) => {
   if (!Number.isFinite(n)) return 0;
-  const pct = n <= 1.5 ? n * 100 : n; // treat 0..1.5 as fractional
-  return +pct.toFixed(decimals);
+  return n <= 1.5 ? n * 100 : n;
 };
 
 export default async function handler(req, res) {
@@ -38,87 +27,96 @@ export default async function handler(req, res) {
   res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 
   try {
-    const from = startOfMonthUTC();
-    const to = endOfTodayUTC();
+    const from = startOfMonth();
+    const to   = endOfToday();
 
-    // DAILY METRICS
+    // ----- Daily totals for Overview -----
     const rows = await prisma.dailyMetric.findMany({
       where: { date: { gte: from, lte: to } },
       orderBy: { date: 'asc' },
-      select: { id: true, date: true, revenue: true, target: true, occupancy: true, arr: true, createdAt: true, updatedAt: true },
+      select: { date: true, revenue: true, target: true, occupancy: true, arr: true, createdAt: true, updatedAt: true },
     });
 
-    let revenueSum = 0;
-    let targetSum = 0;
-    let arrSum = 0, arrCount = 0;
-    const occVals = [];
-
-    for (const r of rows) {
+    let revenueSum = 0, targetSum = 0, arrSum = 0, arrCount = 0, occSum = 0, occCount = 0;
+    const dailySeries = rows.map((r) => {
       const rev = toNum(r.revenue);
       const tgt = toNum(r.target);
+      const arr = Number.isFinite(r.arr) ? Number(r.arr) : NaN;
+      const occ = Number.isFinite(r.occupancy) ? normalizePct(Number(r.occupancy)) : NaN;
+
       revenueSum += rev;
-      targetSum += tgt;
+      targetSum  += tgt;
+      if (Number.isFinite(arr)) { arrSum += arr; arrCount++; }
+      if (Number.isFinite(occ)) { occSum += occ; occCount++; }
 
-      if (r.arr != null) { arrSum += toNum(r.arr); arrCount += 1; }
-
-      if (r.occupancy != null) {
-        occVals.push(toPercent(r.occupancy, 1)); // normalize each row to a percent
-      }
-    }
+      return {
+        day: new Date(r.date).getUTCDate(),
+        date: r.date.toISOString(),
+        revenue: rev,
+        target: tgt,
+        occupancy: Number.isFinite(occ) ? Math.round(occ * 10) / 10 : 0,
+        rate: Number.isFinite(arr) ? Math.round(arr) : 0,
+      };
+    });
 
     const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
-    const occupancyRate = occVals.length
-      ? +(occVals.reduce((a, b) => a + b, 0) / occVals.length).toFixed(1)
-      : 0;
-    const targetVariance = targetSum - revenueSum;
+    const occupancyRate   = occCount ? Math.round((occSum / occCount) * 10) / 10 : 0;
+    const targetVariance  = targetSum - revenueSum;
+    const latest          = rows[rows.length - 1];
+    const lastUpdated     = latest ? (latest.updatedAt || latest.createdAt || latest.date).toISOString() : null;
 
-    const latest = rows[rows.length - 1];
-    const lastUpdated = latest ? (latest.updatedAt || latest.createdAt || latest.date) : null;
+    // ----- Room Types (month-to-date, grouped by type) -----
+    const rts = await prisma.roomTypeMetric.findMany({
+      where: { date: { gte: from, lte: to } },
+      select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
+    });
 
-    const dailySeries = rows.map((r) => ({
-      day: new Date(r.date).getUTCDate(),
-      date: r.date instanceof Date ? r.date.toISOString() : r.date,
-      revenue: toNum(r.revenue),
-      target: toNum(r.target),
-      occupancy: toPercent(r.occupancy, 1),  // keep series in percent too
-      rate: toNum(r.arr),
-    }));
+    const byType = new Map();
+    for (const rt of rts) {
+      const key = rt.type || 'Unknown';
+      const acc = byType.get(key) || { type: key, available: 0, sold: 0, revenue: 0, rateSum: 0, rateCount: 0, occSum: 0, occCount: 0 };
+      acc.available += toNum(rt.available);
+      acc.sold      += toNum(rt.sold);
+      acc.revenue   += toNum(rt.revenue);
 
-    // ROOM TYPES (optional; only if you have the table)
-    // Model expected: RoomTypeMetric { id, date, type, rooms?, available?, sold?, revenue?, rate?, occupancy? }
-    let roomTypes = [];
-    try {
-      const typeRows = await prisma.roomTypeMetric.findMany({
-        where: { date: { gte: from, lte: to } },
-        orderBy: [{ type: 'asc' }],
-      });
+      const rate = Number.isFinite(rt.rate) ? Number(rt.rate) : NaN;
+      if (Number.isFinite(rate)) { acc.rateSum += rate; acc.rateCount++; }
 
-      roomTypes = typeRows.map((t) => ({
-        type: t.type,
-        rooms: t.rooms ?? null,
-        available: t.available ?? null,
-        sold: t.sold ?? null,
-        revenue: toNum(t.revenue),
-        rate: toNum(t.rate),
-        occupancy: toPercent(t.occupancy, 0), // display whole number on cards/bars
-      }));
-    } catch {
-      // Table might not exist yet; that’s fine—dashboard will fall back.
-      roomTypes = [];
+      const occ = Number.isFinite(rt.occupancy) ? normalizePct(Number(rt.occupancy)) : NaN;
+      if (Number.isFinite(occ)) { acc.occSum += occ; acc.occCount++; }
+
+      byType.set(key, acc);
     }
+
+    const roomTypes = Array.from(byType.values()).map((t) => {
+      const rateFromAvg = t.rateCount ? t.rateSum / t.rateCount : 0;
+      const rateFromRev = t.sold ? t.revenue / t.sold : 0;
+      const avgRate     = Math.round((rateFromAvg || rateFromRev) || 0);
+
+      const occFromAvg  = t.occCount ? (t.occSum / t.occCount) : NaN;
+      const occFromCalc = t.available ? (t.sold / t.available) * 100 : NaN;
+      const occPct      = Number.isFinite(occFromAvg) ? occFromAvg : (Number.isFinite(occFromCalc) ? occFromCalc : 0);
+
+      return {
+        type: t.type,
+        available: t.available,
+        sold: t.sold,
+        revenue: t.revenue,
+        rate: avgRate,
+        occupancy: Math.round(occPct * 10) / 10,
+      };
+    });
 
     return res.status(200).json({
       ok: true,
       revenueToDate: revenueSum,
       targetToDate: targetSum,
-      avgRoomRate: averageRoomRate,
       averageRoomRate,
       occupancyRate,
       targetVariance,
-      lastUpdated: lastUpdated instanceof Date ? lastUpdated.toISOString() : lastUpdated,
+      lastUpdated,
       dailySeries,
-      items: rows,
-      roomTypes,                    // <— Dashboard reads this
+      roomTypes,
       totals: {
         revenueToDate: revenueSum,
         targetToDate: targetSum,
