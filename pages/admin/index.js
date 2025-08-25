@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-// ---- helpers ----
+// ---------- helpers ----------
 
 // format YYYY-MM-DD for <input type="date">
 function isoDate(d = new Date()) {
@@ -29,6 +29,14 @@ function fmtOcc(v) {
   if (!Number.isFinite(n)) return '—';
   const pct = n <= 1 ? n * 100 : n; // old fractional values vs percent values
   return `${Math.round(pct * 10) / 10}%`;
+}
+
+// format numbers with thousands separators
+function fmtNum(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString();
 }
 
 export default function AdminPage() {
@@ -67,7 +75,7 @@ export default function AdminPage() {
       date, // YYYY-MM-DD
       revenue: revenue === '' ? null : Number(revenue),
       target: target === '' ? null : Number(target),
-      occupancy: occupancy === '' ? null : Number(occupancy), // expected as percent
+      occupancy: occupancy === '' ? null : Number(occupancy), // expected as percent 0..100
       arr: arr === '' ? null : Number(arr),
       notes: notes || null,
     };
@@ -84,6 +92,7 @@ export default function AdminPage() {
         throw new Error(j.error || 'Save failed');
       }
 
+      // reload table and keep form values as-is (your choice)
       await load();
     } catch (err) {
       console.error(err);
@@ -95,8 +104,6 @@ export default function AdminPage() {
     <main>
       <div className="toolbar">
         <h1>Admin — Daily Updates</h1>
-
-        {/* Upload button to the import page */}
         <Link href="/admin/import" className="upload-btn">
           Upload report
         </Link>
@@ -210,10 +217,10 @@ export default function AdminPage() {
               {items.map((row) => (
                 <tr key={row.id ?? row.date}>
                   <td>{fmtDate(row.date)}</td>
-                  <td>{row.revenue ?? '—'}</td>
-                  <td>{row.target ?? '—'}</td>
+                  <td>{fmtNum(row.revenue)}</td>
+                  <td>{fmtNum(row.target)}</td>
                   <td>{fmtOcc(row.occupancy)}</td>
-                  <td>{row.arr ?? '—'}</td>
+                  <td>{fmtNum(row.arr)}</td>
                   <td>{row.notes ?? '—'}</td>
                 </tr>
               ))}
