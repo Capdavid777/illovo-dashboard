@@ -1,21 +1,13 @@
 // pages/index.js
+import { useUser, withPageAuthRequired } from '@auth0/nextjs-auth0/client';
 import Link from 'next/link';
 import Dashboard from '../components/Dashboard';
-
-// Client-side hooks (for the top bar loading state)
-import { useUser, withPageAuthRequired as withPageAuthRequiredClient } from '@auth0/nextjs-auth0/client';
-// Server-side wrapper (so SSR is also protected)
-import { withPageAuthRequired as withPageAuthRequiredSSR } from '@auth0/nextjs-auth0';
 
 function Home({ overview }) {
   const { user, isLoading } = useUser();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        Loading...
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
   return (
@@ -32,38 +24,36 @@ function Home({ overview }) {
         </div>
       </div>
 
-      {/* Dashboard gets the fresh server-side data here */}
+      {/* Dashboard (SSR data includes .roomTypes now) */}
       <Dashboard overview={overview} />
     </div>
   );
 }
 
-// Protect the page component
-export default withPageAuthRequiredClient(Home);
+export default withPageAuthRequired(Home);
 
-// Protect SSR too and fetch fresh data for every request
-export const getServerSideProps = withPageAuthRequiredSSR({
-  async getServerSideProps(ctx) {
-    try {
-      const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://illovo-dashboard.vercel.app';
+// This runs on every request (no cache) and now returns roomTypes too
+export async function getServerSideProps(ctx) {
+  try {
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      'https://illovo-dashboard.vercel.app';
 
-      const res = await fetch(`${base}/api/overview`, {
-        cache: 'no-store',
-        headers: { 'x-no-cache': Date.now().toString() },
-      });
+    const res = await fetch(`${base}/api/overview`, {
+      cache: 'no-store',
+      headers: { 'x-no-cache': Date.now().toString() },
+    });
 
-      const overview = await res.json();
+    const data = await res.json();
 
-      // Ensure the page itself isn’t cached
-      ctx.res.setHeader(
-        'Cache-Control',
-        'no-store, no-cache, must-revalidate, proxy-revalidate'
-      );
+    // prevent CDN/proxy caching of the page
+    ctx.res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate'
+    );
 
-      return { props: { overview } };
-    } catch (e) {
-      // Never crash the page if the API fails
-      return { props: { overview: null, error: 'fetch-failed' } };
-    }
-  },
-});
+    return { props: { overview: data ?? null } };
+  } catch (e) {
+    return { props: { overview: null, error: 'fetch-failed' } };
+  }
+}
