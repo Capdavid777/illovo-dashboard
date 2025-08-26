@@ -135,4 +135,3 @@ export default async function handler(req, res) {
   }
 }
 
-api: return roomTypes & history; fix occupancy
