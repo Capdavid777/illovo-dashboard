@@ -13,7 +13,7 @@ model DailyMetric {
   date      DateTime @unique
   revenue   Int?
   target    Int?
-  occupancy Float?   // store 46.0 for 46%
+  occupancy Float? // store 46.0 for 46%
   arr       Int?
   notes     String?  @db.Text
   createdAt DateTime @default(now())
@@ -37,4 +37,15 @@ model RoomTypeMetric {
 
   @@unique([date, type], name: "date_type")
   @@index([date])
+}
+
+model YearMetric {
+  id        Int      @id @default(autoincrement())
+  year      Int      @unique               // e.g. 2022, 2023, 2024...
+  roomsSold Int      @default(0)
+  occupancy Float    @default(0)           // store as percent 0..100
+  revenue   Int      @default(0)
+  rate      Int      @default(0)           // ADR
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
