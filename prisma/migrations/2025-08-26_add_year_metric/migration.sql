@@ -1,0 +1,13 @@
+-- Create YearMetric table (Prisma model above)
+CREATE TABLE IF NOT EXISTS "YearMetric" (
+  "id" SERIAL PRIMARY KEY,
+  "year" INTEGER NOT NULL,
+  "roomsSold" INTEGER NOT NULL DEFAULT 0,
+  "occupancy" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  "revenue" INTEGER NOT NULL DEFAULT 0,
+  "rate" INTEGER NOT NULL DEFAULT 0,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "YearMetric_year_key" ON "YearMetric" ("year");
