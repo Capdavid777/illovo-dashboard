@@ -7,16 +7,9 @@ let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
 const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const startOfMonth = (d = new Date()) =>
-  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
-const endOfToday = (d = new Date()) =>
-  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
-
-const normalizePct = (n) => {
-  if (!Number.isFinite(n)) return 0;
-  // accept 0.46 or 46
-  return n <= 1.5 ? n * 100 : n;
-};
+const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+const endOfToday   = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+const normalizePct = (n) => (!Number.isFinite(n) ? 0 : (n <= 1.5 ? n * 100 : n));
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -31,9 +24,9 @@ export default async function handler(req, res) {
 
   try {
     const from = startOfMonth();
-    const to = endOfToday();
+    const to   = endOfToday();
 
-    // ----- Daily totals for Overview -----
+    /* ----- Overview (DailyMetric) ----- */
     const rows = await prisma.dailyMetric.findMany({
       where: { date: { gte: from, lte: to } },
       orderBy: { date: 'asc' },
@@ -68,7 +61,7 @@ export default async function handler(req, res) {
     const latest          = rows[rows.length - 1];
     const lastUpdated     = latest ? (latest.updatedAt || latest.createdAt || latest.date).toISOString() : null;
 
-    // ----- Room Types (month-to-date, grouped by type) -----
+    /* ----- Room Types (aggregate month-to-date) ----- */
     const rts = await prisma.roomTypeMetric.findMany({
       where: { date: { gte: from, lte: to } },
       select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
@@ -110,9 +103,22 @@ export default async function handler(req, res) {
       };
     });
 
+    /* ----- Historical (YearMetric) ----- */
+    const years = await prisma.yearMetric.findMany({
+      orderBy: { year: 'asc' },
+      select: { year: true, roomsSold: true, occupancy: true, revenue: true, rate: true },
+    });
+
+    const history = years.map((y) => ({
+      year: y.year,
+      roomsSold: toNum(y.roomsSold),
+      occupancy: Math.round(normalizePct(Number(y.occupancy)) * 10) / 10,
+      revenue: toNum(y.revenue),
+      rate: toNum(y.rate),
+    }));
+
     return res.status(200).json({
       ok: true,
-      apiVersion: 'rtm-2025-08-26', // <— helps you verify the new build is live
       revenueToDate: revenueSum,
       targetToDate: targetSum,
       averageRoomRate,
@@ -121,6 +127,7 @@ export default async function handler(req, res) {
       lastUpdated,
       dailySeries,
       roomTypes,
+      history,
       totals: {
         revenueToDate: revenueSum,
         targetToDate: targetSum,
@@ -134,4 +141,3 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: false, error: 'INTERNAL_ERROR' });
   }
 }
-
