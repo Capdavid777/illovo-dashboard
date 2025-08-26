@@ -1,94 +1,118 @@
+// pages/api/overview/index.js
 import { PrismaClient } from '@prisma/client';
+
 export const config = { runtime: 'nodejs' };
 
 let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
-const startOfMonth = (d=new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-const endOfToday   = (d=new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23,59,59,999));
-const n = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
-const pct = (x) => {
-  const v = Number(x);
-  if (!Number.isFinite(v)) return 0;
-  return v <= 1.5 ? v * 100 : v;
+const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const startOfMonth = (d = new Date()) =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+const endOfToday = (d = new Date()) =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+
+const normalizePct = (n) => {
+  if (!Number.isFinite(n)) return 0;
+  // accept 0.46 or 46
+  return n <= 1.5 ? n * 100 : n;
 };
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') return res.status(405).json({ ok:false, error:'METHOD_NOT_ALLOWED' });
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
+  }
 
-  res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('CDN-Cache-Control','no-store');
-  res.setHeader('Vercel-CDN-Cache-Control','no-store');
+  // absolutely no cache
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 
   try {
     const from = startOfMonth();
-    const to   = endOfToday();
+    const to = endOfToday();
 
+    // ----- Daily totals for Overview -----
     const rows = await prisma.dailyMetric.findMany({
       where: { date: { gte: from, lte: to } },
       orderBy: { date: 'asc' },
-      select: { date:true, revenue:true, target:true, occupancy:true, arr:true, createdAt:true, updatedAt:true },
+      select: { date: true, revenue: true, target: true, occupancy: true, arr: true, createdAt: true, updatedAt: true },
     });
 
-    let revenueSum=0, targetSum=0, arrSum=0, arrCount=0, occSum=0, occCount=0;
-    const dailySeries = rows.map(r => {
-      const rev = n(r.revenue), tgt = n(r.target);
+    let revenueSum = 0, targetSum = 0, arrSum = 0, arrCount = 0, occSum = 0, occCount = 0;
+    const dailySeries = rows.map((r) => {
+      const rev = toNum(r.revenue);
+      const tgt = toNum(r.target);
       const arr = Number.isFinite(r.arr) ? Number(r.arr) : NaN;
-      const occ = Number.isFinite(r.occupancy) ? pct(Number(r.occupancy)) : NaN;
-      revenueSum += rev; targetSum += tgt;
+      const occ = Number.isFinite(r.occupancy) ? normalizePct(Number(r.occupancy)) : NaN;
+
+      revenueSum += rev;
+      targetSum  += tgt;
       if (Number.isFinite(arr)) { arrSum += arr; arrCount++; }
       if (Number.isFinite(occ)) { occSum += occ; occCount++; }
+
       return {
         day: new Date(r.date).getUTCDate(),
         date: r.date.toISOString(),
         revenue: rev,
         target: tgt,
-        occupancy: Number.isFinite(occ) ? Math.round(occ*10)/10 : 0,
+        occupancy: Number.isFinite(occ) ? Math.round(occ * 10) / 10 : 0,
         rate: Number.isFinite(arr) ? Math.round(arr) : 0,
       };
     });
 
-    const averageRoomRate = arrCount ? Math.round(arrSum/arrCount) : 0;
-    const occupancyRate   = occCount ? Math.round((occSum/occCount)*10)/10 : 0;
+    const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
+    const occupancyRate   = occCount ? Math.round((occSum / occCount) * 10) / 10 : 0;
     const targetVariance  = targetSum - revenueSum;
-    const latest          = rows.at(-1);
+    const latest          = rows[rows.length - 1];
     const lastUpdated     = latest ? (latest.updatedAt || latest.createdAt || latest.date).toISOString() : null;
 
-    // Room types MTD
+    // ----- Room Types (month-to-date, grouped by type) -----
     const rts = await prisma.roomTypeMetric.findMany({
       where: { date: { gte: from, lte: to } },
-      select: { type:true, available:true, sold:true, revenue:true, rate:true, occupancy:true },
+      select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
     });
 
     const byType = new Map();
     for (const rt of rts) {
       const key = rt.type || 'Unknown';
-      const acc = byType.get(key) || { type:key, available:0, sold:0, revenue:0, rateSum:0, rateCount:0, occSum:0, occCount:0 };
-      acc.available += n(rt.available);
-      acc.sold      += n(rt.sold);
-      acc.revenue   += n(rt.revenue);
+      const acc = byType.get(key) || { type: key, available: 0, sold: 0, revenue: 0, rateSum: 0, rateCount: 0, occSum: 0, occCount: 0 };
+      acc.available += toNum(rt.available);
+      acc.sold      += toNum(rt.sold);
+      acc.revenue   += toNum(rt.revenue);
 
-      if (Number.isFinite(rt.rate)) { acc.rateSum += Number(rt.rate); acc.rateCount++; }
-      const occ = Number.isFinite(rt.occupancy) ? pct(Number(rt.occupancy)) : NaN;
+      const rate = Number.isFinite(rt.rate) ? Number(rt.rate) : NaN;
+      if (Number.isFinite(rate)) { acc.rateSum += rate; acc.rateCount++; }
+
+      const occ = Number.isFinite(rt.occupancy) ? normalizePct(Number(rt.occupancy)) : NaN;
       if (Number.isFinite(occ)) { acc.occSum += occ; acc.occCount++; }
 
       byType.set(key, acc);
     }
-    const roomTypes = Array.from(byType.values()).map(t => {
-      const rateAvg = t.rateCount ? t.rateSum / t.rateCount : (t.sold ? t.revenue / t.sold : 0);
-      const occAvg  = t.occCount ? (t.occSum / t.occCount) : (t.available ? (t.sold/t.available)*100 : 0);
+
+    const roomTypes = Array.from(byType.values()).map((t) => {
+      const rateFromAvg = t.rateCount ? t.rateSum / t.rateCount : 0;
+      const rateFromRev = t.sold ? t.revenue / t.sold : 0;
+      const avgRate     = Math.round((rateFromAvg || rateFromRev) || 0);
+
+      const occFromAvg  = t.occCount ? (t.occSum / t.occCount) : NaN;
+      const occFromCalc = t.available ? (t.sold / t.available) * 100 : NaN;
+      const occPct      = Number.isFinite(occFromAvg) ? occFromAvg : (Number.isFinite(occFromCalc) ? occFromCalc : 0);
+
       return {
         type: t.type,
         available: t.available,
         sold: t.sold,
         revenue: t.revenue,
-        rate: Math.round(rateAvg || 0),
-        occupancy: Math.round((occAvg || 0)*10)/10,
+        rate: avgRate,
+        occupancy: Math.round(occPct * 10) / 10,
       };
     });
 
-    res.status(200).json({
-      ok:true,
+    return res.status(200).json({
+      ok: true,
+      apiVersion: 'rtm-2025-08-26', // <— helps you verify the new build is live
       revenueToDate: revenueSum,
       targetToDate: targetSum,
       averageRoomRate,
@@ -97,10 +121,16 @@ export default async function handler(req, res) {
       lastUpdated,
       dailySeries,
       roomTypes,
-      totals:{ revenueToDate: revenueSum, targetToDate: targetSum, averageRoomRate, occupancyRate, targetVariance }
+      totals: {
+        revenueToDate: revenueSum,
+        targetToDate: targetSum,
+        averageRoomRate,
+        occupancyRate,
+        targetVariance,
+      },
     });
-  } catch (e) {
-    console.error('GET /api/overview', e);
-    res.status(200).json({ ok:false, error:'INTERNAL_ERROR' });
+  } catch (err) {
+    console.error('GET /api/overview error:', err);
+    return res.status(200).json({ ok: false, error: 'INTERNAL_ERROR' });
   }
 }
