@@ -222,7 +222,10 @@ const Dashboard = ({ overview }) => {
             <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
+            <div
+              className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
+              style={{ width: `${revenueProgressPct}%` }}
+            />
           </div>
         </div>
         <div className="space-y-2">
@@ -231,7 +234,10 @@ const Dashboard = ({ overview }) => {
             <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
+            <div
+              className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
+              style={{ width: `${occupancyProgressPct}%` }}
+            />
           </div>
         </div>
       </div>
@@ -267,7 +273,7 @@ const Dashboard = ({ overview }) => {
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
-    const [compact, setCompact] = useState(true); // default density = Compact ✅
+    const [compact, setCompact] = useState(true); // default density = Compact
 
     const sorted = useMemo(() => {
       const keyMap = {
@@ -325,7 +331,12 @@ const Dashboard = ({ overview }) => {
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-lg font-semibold">{room.type}</h4>
-                    <p className="text-xs text-gray-500">{num(room.sold)}/{num(room.available)} sold</p>
+                    <p className="text-xs text-gray-500">
+                      <span>{num(room.sold)}</span>
+                      <span className="mx-0.5 font-bold text-black">/</span>
+                      <span>{num(room.available)}</span>
+                      <span> sold</span>
+                    </p>
                   </div>
                 </div>
 
@@ -407,7 +418,6 @@ const Dashboard = ({ overview }) => {
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
 
-            {/* 👇 Helper note users can expand/collapse */}
             <details className="text-xs text-gray-600 mb-4 mt-2">
               <summary className="cursor-pointer select-none text-gray-700">How to read this</summary>
               <div className="mt-2 leading-relaxed">
