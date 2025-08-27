@@ -62,8 +62,7 @@ const ROOM_PALETTES = {
   'Queen':         { start: '#D4AF37', end: '#C29D2C' }, // Soft Gold
   'Queen Room':    { start: '#D4AF37', end: '#C29D2C' }, // alias
 };
-
-const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' }; // fallback
+const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
 const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
 /* ------------------------------ component ------------------------------ */
@@ -74,7 +73,6 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ derived data ------------------------------ */
 
-  // Room types: fallback + normalization
   const fallbackRoomTypeData = [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
@@ -93,14 +91,12 @@ const Dashboard = ({ overview }) => {
     return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
   });
 
-  // Summary stats
   const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
   const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
-  // Historical fallback
   const fallbackYearlyData = [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
@@ -220,32 +216,22 @@ const Dashboard = ({ overview }) => {
       {/* Progress Bars */}
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-lg font-semibold mb-4">Progress to Breakeven</h3>
-
-        {/* Revenue */}
         <div className="space-y-2 mb-4">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
             <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
-              style={{ width: `${revenueProgressPct}%` }}
-            />
+            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
           </div>
         </div>
-
-        {/* Occupancy */}
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
             <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
-              style={{ width: `${occupancyProgressPct}%` }}
-            />
+            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
           </div>
         </div>
       </div>
@@ -262,9 +248,7 @@ const Dashboard = ({ overview }) => {
                 <YAxis />
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
-                {/* Target = black */}
                 <Bar dataKey="target" name="Daily Target" fill="#000000" />
-                {/* Revenue = red, turns green if >= target */}
                 <Bar dataKey="revenue" name="Actual Revenue">
                   {ov.dailyData.map((d, i) => (
                     <Cell key={`rev-${i}`} fill={d.revenue >= d.target ? '#10B981' : '#EF4444'} />
@@ -281,9 +265,9 @@ const Dashboard = ({ overview }) => {
   );
 
   const RoomTypesView = () => {
-    const [sortBy, setSortBy] = useState('revenue'); // revenue | occupancy | rate | sold
+    const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
-    const [compact, setCompact] = useState(true);    // default density = Compact ✅
+    const [compact, setCompact] = useState(true); // default density = Compact ✅
 
     const sorted = useMemo(() => {
       const keyMap = {
@@ -311,22 +295,13 @@ const Dashboard = ({ overview }) => {
         <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Sort by</label>
-            <select
-              className="border rounded-md px-2 py-1 text-sm"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-            >
+            <select className="border rounded-md px-2 py-1 text-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="revenue">Revenue</option>
               <option value="occupancy">Occupancy</option>
               <option value="rate">ADR</option>
               <option value="sold">Sold</option>
             </select>
-            <button
-              className="ml-2 inline-flex items-center border px-2 py-1 rounded-md text-sm"
-              onClick={() => setAsc(v => !v)}
-              title="Toggle ascending/descending"
-              type="button"
-            >
+            <button className="ml-2 inline-flex items-center border px-2 py-1 rounded-md text-sm" onClick={() => setAsc(v => !v)} type="button" title="Toggle ascending/descending">
               <ArrowUpDown className="w-4 h-4 mr-1" />
               {asc ? 'Asc' : 'Desc'}
             </button>
@@ -334,12 +309,7 @@ const Dashboard = ({ overview }) => {
 
           <div className="flex items-center gap-2">
             <label htmlFor="density" className="text-sm text-gray-600">Density</label>
-            <select
-              id="density"
-              className="border rounded-md px-2 py-1 text-sm"
-              value={compact ? 'compact' : 'comfort'}
-              onChange={(e) => setCompact(e.target.value === 'compact')}
-            >
+            <select id="density" className="border rounded-md px-2 py-1 text-sm" value={compact ? 'compact' : 'comfort'} onChange={(e) => setCompact(e.target.value === 'compact')}>
               <option value="comfort">Comfort</option>
               <option value="compact">Compact</option>
             </select>
@@ -391,7 +361,7 @@ const Dashboard = ({ overview }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Revenue by Room Type (Pie) */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold mb-4">Revenue by Room Type</h3>
+            <h3 className="text-lg font-semibold mb-2">Revenue by Room Type</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -433,9 +403,27 @@ const Dashboard = ({ overview }) => {
             </div>
           </div>
 
-          {/* Occupancy vs ADR (kept metric colors) */}
+          {/* Occupancy vs ADR (with helper explanation) */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold mb-4">Occupancy vs ADR</h3>
+            <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
+
+            {/* 👇 Helper note users can expand/collapse */}
+            <details className="text-xs text-gray-600 mb-4 mt-2">
+              <summary className="cursor-pointer select-none text-gray-700">How to read this</summary>
+              <div className="mt-2 leading-relaxed">
+                <p className="mb-1">
+                  The chart compares each room type’s <span className="font-medium">Occupancy (%)</span> with its
+                  {' '}<span className="font-medium">Average Daily Rate (ADR)</span> so you can see how price and demand line up:
+                </p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><span className="font-medium">High ADR + low occupancy</span> → likely overpriced; consider discounting or promos.</li>
+                  <li><span className="font-medium">Low ADR + high occupancy</span> → room type is underpriced; test a rate increase.</li>
+                  <li><span className="font-medium">Both high</span> → star performer; protect rate and allocate inventory.</li>
+                  <li><span className="font-medium">Both low</span> → weak product; repackage or reposition.</li>
+                </ul>
+              </div>
+            </details>
+
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData}>
@@ -531,7 +519,6 @@ const Dashboard = ({ overview }) => {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
-            {/* Left: logo + title */}
             <div className="flex items-center gap-3">
               <Image src="/rs-logo2.png" alt="Reserved Suites" width={40} height={40} priority />
               <div>
@@ -539,8 +526,6 @@ const Dashboard = ({ overview }) => {
                 <p className="text-sm text-gray-500">Revenue Dashboard</p>
               </div>
             </div>
-
-            {/* Right: last updated */}
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
