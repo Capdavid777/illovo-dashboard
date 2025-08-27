@@ -2,38 +2,25 @@
 import 'dotenv/config';
 import cron from 'node-cron';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { chromium } from 'playwright';
 import { google } from 'googleapis';
 import { Server, Tool } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 /* ========================= ENV / CONFIG ========================= */
-// You gave:
-//  - URL: https://web-prod.semper-services.com/auth
-//  - Username: Luba
-//  - Password: 0802
-//  - Venue ID: 19205
-// These are used as defaults but should live in .env for safety.
-
+// Defaults from what you shared. Move to .env for safety!
 const {
   SEMPER_BASE_URL = 'https://web-prod.semper-services.com/auth',
   SEMPER_USERNAME = 'Luba',
   SEMPER_PASSWORD = '0802',
   SEMPER_VENUE_ID = '19205',
 
-  // Optional: if you know the exact export page AFTER login, put it here.
-  // Example: https://web-prod.semper-services.com/reports/daily/export
-  SEMPER_EXPORT_URL,
-
-  // Optional: comma-separated button texts to try for download
-  // e.g., "Export CSV,Download CSV,Export to CSV"
-  SEMPER_DOWNLOAD_TEXT = 'Export CSV,Download CSV,Export to CSV',
-
   SHEET_ID,
   SHEET_TAB = 'Raw',
   DRIVE_FOLDER_ID,
   XLSX_FILENAME = 'RS Dashboard Data.xlsx',
-  CRON = '0 6,14,22 * * *', // 06:00, 14:00, 22:00 (server timezone)
+  CRON = '0 6,14,22 * * *', // 06:00, 14:00, 22:00 daily (server local time)
 } = process.env;
 
 if (!SHEET_ID) console.error('[config] Missing SHEET_ID');
@@ -42,7 +29,21 @@ if (!DRIVE_FOLDER_ID) console.error('[config] Missing DRIVE_FOLDER_ID');
 /* ========================= SMALL HELPERS ========================= */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function waitForAny(page, selectors, timeout = 15000) {
+function monthEdges(d = new Date()) {
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0); // last day this month
+  return { start, end };
+}
+
+function fmt(d, style = 'iso') {
+  // we’ll try multiple formats when typing
+  const pad = (n) => String(n).padStart(2, '0');
+  if (style === 'iso') return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (style === 'slash_uk') return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return d.toLocaleDateString('en-ZA'); // 2025/08/27 on some systems
+}
+
+async function waitForAny(page, selectors, timeout = 20000) {
   const start = Date.now();
   for (;;) {
     for (const sel of selectors) {
@@ -60,11 +61,12 @@ async function fillFirst(page, selectors, value) {
   for (const sel of selectors) {
     const el = await page.$(sel);
     if (el) {
-      await page.fill(sel, String(value));
+      await page.fill(sel, '');
+      await page.type(sel, String(value), { delay: 20 });
       return sel;
     }
   }
-  throw new Error(`Could not find input for value "${value}" using selectors: ${selectors.join(' | ')}`);
+  throw new Error(`Could not find input using selectors: ${selectors.join(' | ')}`);
 }
 
 async function clickFirst(page, selectors) {
@@ -95,23 +97,23 @@ async function getGoogleClients() {
 
 /* ========================= SEMPER SCRAPER ========================= */
 /**
- * Login to Semper and download a CSV export.
- * Returns the CSV text (utf-8).
- *
- * NOTE: After login, if SEMPER_EXPORT_URL is set, we go there directly.
- * Otherwise we try a few generic "Reports/Export" clicks and then a CSV button.
+ * Steps (per your instructions):
+ * 1) Login with Venue ID, Username, Password
+ * 2) Click "General" (provided selector); then go to All Reports page
+ * 3) Open "History & Forecast" → "Room Types History and Forecast"
+ * 4) Set date range (1st → last day of current month)
+ * 5) Click "Export to Excel" and capture the download
+ * Returns: { rows, xlsxBuffer, filename }
  */
-async function fetchSemperCsv() {
+async function fetchSemperReport() {
   const browser = await chromium.launch({ headless: true });
   const ctx = await browser.newContext({ acceptDownloads: true });
   const page = await ctx.newPage();
 
-  // 1) Login
-  console.log('[semper] opening login:', SEMPER_BASE_URL);
+  /* --- 1) LOGIN --- */
+  console.log('[semper] goto login:', SEMPER_BASE_URL);
   await page.goto(SEMPER_BASE_URL, { waitUntil: 'domcontentloaded' });
 
-  // Try a variety of selectors that commonly appear on auth pages.
-  // Venue ID
   await fillFirst(page, [
     'input[name="venueId"]',
     'input[name="venue_id"]',
@@ -121,7 +123,6 @@ async function fetchSemperCsv() {
     'input[aria-label*="Venue"]',
   ], SEMPER_VENUE_ID);
 
-  // Username
   await fillFirst(page, [
     'input[name="username"]',
     'input#username',
@@ -130,7 +131,6 @@ async function fetchSemperCsv() {
     'input[name="user"]',
   ], SEMPER_USERNAME);
 
-  // Password
   await fillFirst(page, [
     'input[name="password"]',
     'input[type="password"]',
@@ -139,124 +139,229 @@ async function fetchSemperCsv() {
     'input[aria-label*="Password"]',
   ], SEMPER_PASSWORD);
 
-  // Click a login/submit button
-  const loginClicked = await clickFirst(page, [
+  const clickedLogin = await clickFirst(page, [
     'button[type="submit"]',
     'button:has-text("Log in")',
     'button:has-text("Login")',
     'button:has-text("Sign in")',
     'text=Log in',
     'text=Login',
-    'text=Sign in',
   ]);
-  console.log('[semper] clicked login via:', loginClicked);
+  console.log('[semper] clicked login via:', clickedLogin);
 
-  // Wait for post-login load
   await page.waitForLoadState('networkidle', { timeout: 30000 });
-  await sleep(500);
 
-  // 2) Navigate to export page (if known), else try to find Reports/Export
-  if (SEMPER_EXPORT_URL) {
-    console.log('[semper] going to export URL:', SEMPER_EXPORT_URL);
-    await page.goto(SEMPER_EXPORT_URL, { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle', { timeout: 30000 });
-  } else {
-    console.log('[semper] trying to reach a reports/export view automatically …');
-    // Try a few generic paths
-    const guesses = [
-      'a:has-text("Reports")',
-      'a:has-text("Report")',
-      'button:has-text("Reports")',
-      'button:has-text("Report")',
-      'nav :has-text("Reports")',
-    ];
-    try {
-      const found = await waitForAny(page, guesses, 10000).catch(() => null);
-      if (found) {
-        await page.click(found);
-        await page.waitForLoadState('networkidle', { timeout: 20000 });
-      }
-    } catch (e) {
-      console.log('[semper] could not auto-open reports menu (continuing):', e.message);
-    }
+  /* --- 2) GENERAL → ALL REPORTS --- */
+  // Try the exact selector you gave, then fall back to text.
+  const generalSel = await (async () => {
+    const hard = '#\\34  > div.p-menuitem-content > a > span';
+    if (await page.$(hard)) return hard;
+    return await waitForAny(page, [
+      'a:has-text("General")',
+      'span:has-text("General")',
+      'button:has-text("General")',
+      '[role="menuitem"]:has-text("General")',
+    ], 8000);
+  })();
+  try {
+    await page.click(generalSel);
+  } catch (e) {
+    console.log('[semper] could not click "General" (continuing):', e.message);
   }
 
-  // 3) Trigger the CSV download
-  const texts = SEMPER_DOWNLOAD_TEXT.split(',').map((s) => s.trim()).filter(Boolean);
-  const buttonSelectors = [
-    ...texts.map((t) => `button:has-text("${t}")`),
-    ...texts.map((t) => `a:has-text("${t}")`),
-    '[data-testid*="export"]',
-    '[data-test*="export"]',
-    '[aria-label*="export"]',
-    'button:has-text("CSV")',
-    'a:has-text("CSV")',
+  // Go directly to All Reports
+  const ALL_REPORTS = 'https://web-prod.semper-services.com/reports/allReports/1';
+  console.log('[semper] goto All Reports:', ALL_REPORTS);
+  await page.goto(ALL_REPORTS, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle', { timeout: 30000 });
+
+  /* --- 3) HISTORY & FORECAST → ROOM TYPES HISTORY AND FORECAST --- */
+  // Try your deep selector, else text.
+  const histHeaderSel = await (async () => {
+    const deep =
+      'body > app-root > app-main-layout > div > div.container-fluid > app-all-reports > div > div > div.card-body > div > form > div:nth-child(2) > div:nth-child(3) > div > div:nth-child(4) > div > div > b';
+    if (await page.$(deep)) return deep;
+    return await waitForAny(page, [
+      'b:has-text("History & Forecast")',
+      'div:has-text("History & Forecast")',
+      'span:has-text("History & Forecast")',
+      'button:has-text("History & Forecast")',
+      'a:has-text("History & Forecast")',
+    ], 8000);
+  })();
+  await page.click(histHeaderSel).catch(() => {}); // may only need to expand
+
+  const roomTypesSel = await waitForAny(page, [
+    'a:has-text("Room Types History and Forecast")',
+    'button:has-text("Room Types History and Forecast")',
+    'span:has-text("Room Types History and Forecast")',
+    'div:has-text("Room Types History and Forecast")',
+  ], 15000);
+  await page.click(roomTypesSel);
+  await page.waitForLoadState('networkidle', { timeout: 30000 });
+
+  // Report viewer URL (should be here after click)
+  // If not, force it:
+  const VIEWER = 'https://web-prod.semper-services.com/reports/report-viewer';
+  if (!page.url().includes('/reports/report-viewer')) {
+    console.log('[semper] forcing report-viewer URL:', VIEWER);
+    await page.goto(VIEWER, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 30000 });
+  }
+
+  /* --- 4) DATE RANGE (first → last day this month) --- */
+  const { start, end } = monthEdges();
+  // We’ll try a few likely selectors for from/to date inputs:
+  const fromSelectors = [
+    'input[name="from"]',
+    'input[name="fromDate"]',
+    'input[formcontrolname="fromDate"]',
+    'input[placeholder*="From"]',
+    'input[aria-label*="From"]',
+    'input#from',
+  ];
+  const toSelectors = [
+    'input[name="to"]',
+    'input[name="toDate"]',
+    'input[formcontrolname="toDate"]',
+    'input[placeholder*="To"]',
+    'input[aria-label*="To"]',
+    'input#to',
   ];
 
-  console.log('[semper] looking for export control among:', buttonSelectors.join(' | '));
+  // Try multiple formats if necessary
+  const formats = [fmt(start, 'iso'), fmt(start, 'slash_uk'), fmt(start)];
+  let filledFrom = false;
+  for (const f of formats) {
+    try {
+      await fillFirst(page, fromSelectors, f);
+      filledFrom = true;
+      break;
+    } catch { /* try next format */ }
+  }
+  if (!filledFrom) console.warn('[semper] could not fill FROM date with any known selector/format');
 
+  const formatsTo = [fmt(end, 'iso'), fmt(end, 'slash_uk'), fmt(end)];
+  let filledTo = false;
+  for (const f of formatsTo) {
+    try {
+      await fillFirst(page, toSelectors, f);
+      filledTo = true;
+      break;
+    } catch { /* try next format */ }
+  }
+  if (!filledTo) console.warn('[semper] could not fill TO date with any known selector/format');
+
+  // Try an action button to run the report
+  try {
+    const runSel = await waitForAny(page, [
+      'button:has-text("View")',
+      'button:has-text("Run")',
+      'button:has-text("Search")',
+      'button:has-text("Apply")',
+      'button:has-text("Generate")',
+    ], 5000);
+    await page.click(runSel);
+    await page.waitForLoadState('networkidle', { timeout: 30000 });
+  } catch {
+    // sometimes the report loads automatically
+  }
+
+  /* --- 5) EXPORT TO EXCEL --- */
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),
     (async () => {
-      const sel = await waitForAny(page, buttonSelectors, 20000);
-      console.log('[semper] clicking export via:', sel);
-      await page.click(sel);
+      const exportSel = await waitForAny(page, [
+        'button:has-text("Export to Excel")',
+        'a:has-text("Export to Excel")',
+        'button:has-text("Excel")',
+        'a:has-text("Excel")',
+        '[data-testid*="export"]',
+        '[aria-label*="Export"]',
+      ], 20000);
+      await page.click(exportSel);
     })(),
   ]);
 
-  const csvText = await download.createReadStream().then(streamToString);
-  console.log('[semper] CSV downloaded, bytes:', csvText?.length || 0);
-
+  const suggested = download.suggestedFilename();
+  const buf = await download.createReadStream().then(streamToBuffer);
   await browser.close();
-  return csvText;
+
+  // Convert to rows for writing to Google Sheet.
+  let rows = [];
+  if (suggested?.toLowerCase().endsWith('.csv')) {
+    rows = Papa.parse(buf.toString('utf8').trim()).data;
+  } else {
+    // Assume XLSX/XLS – take first worksheet
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const first = wb.SheetNames[0];
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[first], { header: 1, raw: true });
+    rows = aoa;
+  }
+
+  return { rows, xlsxBuffer: ensureXlsxBuffer(buf, suggested, rows), filename: suggested || 'semper.xlsx' };
 }
 
-function streamToString(stream) {
+function streamToBuffer(stream) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     stream.on('data', (d) => chunks.push(Buffer.from(d)));
-    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', reject);
   });
 }
 
-/* ========================= TRANSFORM & PUBLISH ========================= */
-async function writeToSheet(csv) {
-  const { sheets } = await getGoogleClients();
-  const rows = Papa.parse(csv.trim()).data;
+// If we downloaded CSV, build an XLSX so we can upload a consistent Excel file.
+function ensureXlsxBuffer(originalBuf, filename, rows) {
+  const lower = (filename || '').toLowerCase();
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return originalBuf;
 
-  // Clear & write
+  // Build XLSX from rows (CSV case)
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows || []);
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
+}
+
+/* ========================= SHEETS & DRIVE ========================= */
+async function writeToSheet(rows) {
+  const { sheets } = await getGoogleClients();
+
   await sheets.spreadsheets.values.clear({
     spreadsheetId: SHEET_ID,
     range: SHEET_TAB,
   });
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SHEET_ID,
-    range: SHEET_TAB,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
 
-  // Optional: auto-size a handful of columns
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          autoResizeDimensions: {
-            dimensions: {
-              sheetId: await getSheetGid(sheets, SHEET_ID, SHEET_TAB),
-              dimension: 'COLUMNS',
-              startIndex: 0,
-              endIndex: Math.min(30, rows[0]?.length || 10),
+  // Avoid empty write when report has no rows
+  if (rows && rows.length) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: SHEET_TAB,
+      valueInputOption: 'RAW',
+      requestBody: { values: rows },
+    });
+
+    // Auto-size some columns
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            autoResizeDimensions: {
+              dimensions: {
+                sheetId: await getSheetGid(sheets, SHEET_ID, SHEET_TAB),
+                dimension: 'COLUMNS',
+                startIndex: 0,
+                endIndex: Math.min(30, rows[0]?.length || 10),
+              },
             },
           },
-        },
-      ],
-    },
-  });
+        ],
+      },
+    });
+  }
 
-  return { rows: rows.length, cols: rows[0]?.length || 0 };
+  return { rows: rows?.length || 0, cols: rows?.[0]?.length || 0 };
 }
 
 async function getSheetGid(sheets, spreadsheetId, tabName) {
@@ -265,19 +370,10 @@ async function getSheetGid(sheets, spreadsheetId, tabName) {
   return sheet?.properties?.sheetId;
 }
 
-async function exportSheetToXlsx() {
+async function uploadExcelToDrive(xlsxBuffer) {
   const { drive } = await getGoogleClients();
 
-  // Export Google Sheet → XLSX
-  const res = await drive.files.export(
-    {
-      fileId: SHEET_ID,
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    },
-    { responseType: 'arraybuffer' }
-  );
-
-  // Remove existing file with same name
+  // Remove existing with same name
   const list = await drive.files.list({
     q: `'${DRIVE_FOLDER_ID}' in parents and name='${XLSX_FILENAME}' and trashed=false`,
     fields: 'files(id,name)',
@@ -295,7 +391,7 @@ async function exportSheetToXlsx() {
     },
     media: {
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      body: Buffer.from(res.data),
+      body: xlsxBuffer,
     },
   });
 }
@@ -304,11 +400,13 @@ async function exportSheetToXlsx() {
 let LAST_RUN = null;
 
 async function runPipeline() {
-  console.log('[pipeline] starting …');
-  const csv = await fetchSemperCsv();
-  if (!csv) throw new Error('No CSV downloaded from Semper.');
-  const stats = await writeToSheet(csv);
-  await exportSheetToXlsx();
+  console.log('[pipeline] start');
+  const { rows, xlsxBuffer, filename } = await fetchSemperReport();
+  console.log('[pipeline] downloaded:', filename, 'rows:', rows?.length || 0);
+
+  const stats = await writeToSheet(rows);
+  await uploadExcelToDrive(xlsxBuffer);
+
   LAST_RUN = { at: new Date().toISOString(), stats };
   console.log('[pipeline] done:', LAST_RUN);
   return LAST_RUN;
@@ -316,26 +414,23 @@ async function runPipeline() {
 
 /* ========================= MCP SERVER (tools) ========================= */
 const server = new Server(
-  { name: 'semper-mcp', version: '1.0.0' },
+  { name: 'semper-mcp', version: '1.1.0' },
   { capabilities: { tools: {} } }
 );
 
-// Run now (on-demand)
 server.tool(
-  new Tool('semper.pullAndPublish', 'Login to Semper, download CSV, write to Google Sheet, export XLSX'),
+  new Tool('semper.pullAndPublish', 'Login to Semper, navigate to Room Types History & Forecast, export Excel, update Sheet, upload XLSX'),
   async () => {
     const result = await runPipeline();
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );
 
-// Last run info
 server.tool(
   new Tool('semper.lastRun', 'Show timestamp and row/col counts from last run'),
   async () => ({ content: [{ type: 'text', text: JSON.stringify(LAST_RUN, null, 2) }] })
 );
 
-// Start MCP (for ChatGPT Desktop or any MCP client)
 server.connect(new StdioServerTransport());
 
 /* ========================= SCHEDULER ========================= */
@@ -346,14 +441,12 @@ if (CRON) {
   console.log('[scheduler] active CRON:', CRON);
 }
 
-/* ========================= REMINDER =========================
- * For security, set these in semper-mcp/.env and remove defaults above:
+/* ========================= SECURITY REMINDER =========================
+ * Move these into semper-mcp/.env:
  *  SEMPER_BASE_URL=https://web-prod.semper-services.com/auth
  *  SEMPER_USERNAME=Luba
  *  SEMPER_PASSWORD=0802
  *  SEMPER_VENUE_ID=19205
- *  SEMPER_EXPORT_URL=<<optional_known_export_page>>
- *  SEMPER_DOWNLOAD_TEXT=Export CSV,Download CSV,Export to CSV
  *  SHEET_ID=<<your_sheet_id>>
  *  SHEET_TAB=Raw
  *  DRIVE_FOLDER_ID=<<your_drive_folder_id>>
