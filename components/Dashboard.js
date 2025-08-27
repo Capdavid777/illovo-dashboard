@@ -18,6 +18,9 @@ const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
+// ↓ make Y-axis ticks a bit smaller so top labels fit
+const Y_TICK_SMALL = { fontSize: 11 };
+
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
   const revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], 0));
@@ -157,6 +160,7 @@ const Dashboard = ({ overview }) => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
+    the
     const hitTarget = num(pData.revenue) >= num(pData.target);
     const revColor = hitTarget ? '#10B981' : '#EF4444';
 
@@ -248,10 +252,10 @@ const Dashboard = ({ overview }) => {
         <div className="h-80">
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ov.dailyData}>
+              <BarChart data={ov.dailyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
-                <YAxis />
+                <YAxis tick={Y_TICK_SMALL} />
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
                 <Bar dataKey="target" name="Daily Target" fill="#000000" />
@@ -436,10 +440,10 @@ const Dashboard = ({ overview }) => {
 
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={roomTypeData}>
+                <BarChart data={roomTypeData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
-                  <YAxis />
+                  <YAxis tick={Y_TICK_SMALL} />
                   <RechartsTooltip formatter={(value, name) => {
                     if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
                     if (name === 'rate') return [currency(value), 'ADR'];
@@ -464,12 +468,12 @@ const Dashboard = ({ overview }) => {
           <h3 className="text-lg font-semibold mb-4">Annual Revenue Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData}>
+              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis />
+                <YAxis tick={Y_TICK_SMALL} />
                 <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
-                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} />
+                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} dot />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -479,12 +483,12 @@ const Dashboard = ({ overview }) => {
           <h3 className="text-lg font-semibold mb-4">Occupancy Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData}>
+              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis />
+                <YAxis tick={Y_TICK_SMALL} />
                 <RechartsTooltip formatter={(value) => [`${Math.round(num(value))}%`, 'Occupancy']} />
-                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} />
+                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} dot />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -582,4 +586,4 @@ const Dashboard = ({ overview }) => {
   );
 };
 
-export default Dashboard
+export default Dashboard;
