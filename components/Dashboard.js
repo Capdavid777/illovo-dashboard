@@ -13,36 +13,19 @@ import {
 /* ------------------------------ helpers ------------------------------ */
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
-
-// Normalize 0–1 fractions (0.57) to percents (57). Leave real percents intact.
-const asPercent = (v, d = 0) => {
-  const n = num(v, d);
-  if (!Number.isFinite(n)) return d;
-  return n <= 1.5 ? n * 100 : n;
-};
-
+const asPercent = (v, d = 0) => { const n = num(v, d); return !Number.isFinite(n) ? d : (n <= 1.5 ? n * 100 : n); };
 const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
-/** Normalize whatever /api/overview returns into what the UI needs. */
 function normalizeOverview(raw = {}) {
-  const get = (keys, fallback) => {
-    for (const k of keys) {
-      if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k];
-    }
-    return fallback;
-  };
-
+  const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
   const revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], 0));
   const targetToDate    = num(get(['targetToDate', 'target_to_date', 'target'], 0));
   const averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr'], 0));
-
-  // occupancy can be fraction or percent already
   let occupancyRate = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  // daily series (with aliases)
   const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows'], []) || [];
   const dailyData = dailyRaw.map((d, i) => {
     const day = d.day ?? (d.date ? new Date(d.date).getUTCDate() : i + 1);
@@ -57,7 +40,6 @@ function normalizeOverview(raw = {}) {
     };
   });
 
-  // If occupancy wasn’t provided, compute avg from daily points
   if (!Number.isFinite(occupancyRate)) {
     const vals = dailyData.map((d) => d.occupancy).filter((n) => Number.isFinite(n));
     occupancyRate = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
@@ -65,30 +47,16 @@ function normalizeOverview(raw = {}) {
 
   const targetVariance = targetToDate - revenueToDate;
   const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
-
-  // Optional room-type & historical series (if your API includes them)
   const roomTypes = get(['roomTypes', 'roomTypesData'], null);
   const history   = get(['history', 'yearlyData'], null);
 
-  return {
-    revenueToDate,
-    targetToDate,
-    averageRoomRate,
-    occupancyRate,
-    targetVariance,
-    dailyData,
-    lastUpdated,
-    roomTypes,
-    history,
-  };
+  return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
 }
 
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
   const [selectedView, setSelectedView] = useState('overview');
-
-  // Normalize the SSR overview payload
   const ov = useMemo(() => normalizeOverview(overview), [overview]);
 
   /* ------------------------------ derived data ------------------------------ */
@@ -104,33 +72,22 @@ const Dashboard = ({ overview }) => {
   ];
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : fallbackRoomTypeData;
 
-  // enrich room types for UI (ensure numbers & percentages normalized)
   const roomTypeData = roomTypeRaw.map((rt) => {
     const available = num(rt.available, null);
     const sold      = num(rt.sold, null);
     const revenue   = num(rt.revenue, 0);
     const rate      = num(rt.rate ?? rt.arr, 0);
-    // derive occ if missing and we have sold/available:
     const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
     const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
-    return {
-      type: rt.type || 'Unknown',
-      available: available ?? 0,
-      sold: sold ?? 0,
-      revenue,
-      rate,
-      occupancy: occ,
-    };
+    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
   });
 
-  // Summary for room types
   const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
   const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
-  // Historical fallback
   const fallbackYearlyData = [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
@@ -140,35 +97,28 @@ const Dashboard = ({ overview }) => {
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : fallbackYearlyData;
 
   const revenueProgressPct   = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
-  const occupancyTargetPct   = 62; // adjust if your API provides a target
+  const occupancyTargetPct   = 62;
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
+
+  // ⬇️ Breakeven ARR used for subtitle
+  const breakevenRate = 1237;
 
   /* ------------------------------ reusable bits ------------------------------ */
 
-  // Gold, white, hover-lift metric cards
-  const MetricCard = ({ title, value, subtitle, icon: Icon }) => {
-    return (
-      <div
-        className="
-          group rounded-xl border border-[#CBA135] bg-white
-          shadow-sm transition-all duration-200 transform-gpu
-          hover:-translate-y-1 hover:shadow-xl
-        "
-      >
-        <div className="flex items-center justify-between p-6">
-          <div>
-            <p className="text-sm font-medium text-gray-600">{title}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-            {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
-          </div>
-
-          <div className="p-3 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30">
-            <Icon className="w-6 h-6" />
-          </div>
+  const MetricCard = ({ title, value, subtitle, icon: Icon }) => (
+    <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
+      <div className="flex items-center justify-between p-6">
+        <div>
+          <p className="text-sm font-medium text-gray-600">{title}</p>
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
+          {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+        </div>
+        <div className="p-3 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30">
+          <Icon className="w-6 h-6" />
         </div>
       </div>
-    );
-  };
+    </div>
+  );
 
   /* ------------------------------ VIEWS ------------------------------ */
 
@@ -191,7 +141,7 @@ const Dashboard = ({ overview }) => {
         <MetricCard
           title="Average Room Rate"
           value={currency(ov.averageRoomRate)}
-          subtitle="vs breakeven"
+          subtitle={`vs breakeven ${currency(breakevenRate)}`}   // ⬅️ shows the actual breakeven ARR
           icon={Home}
         />
         <MetricCard
@@ -252,8 +202,7 @@ const Dashboard = ({ overview }) => {
   );
 
   const RoomTypesView = () => {
-    // UI state for add-ons
-    const [sortBy, setSortBy] = useState('revenue'); // revenue | occupancy | rate | sold
+    const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
     const [compact, setCompact] = useState(false);
 
@@ -271,7 +220,6 @@ const Dashboard = ({ overview }) => {
 
     return (
       <div className="space-y-8">
-        {/* Summary Banner */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
           <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
@@ -279,15 +227,10 @@ const Dashboard = ({ overview }) => {
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
-        {/* Controls */}
         <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Sort by</label>
-            <select
-              className="border rounded-md px-2 py-1 text-sm"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-            >
+            <select className="border rounded-md px-2 py-1 text-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
               <option value="revenue">Revenue</option>
               <option value="occupancy">Occupancy</option>
               <option value="rate">ADR</option>
@@ -318,7 +261,6 @@ const Dashboard = ({ overview }) => {
           </div>
         </div>
 
-        {/* Cards Grid */}
         <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
           {sorted.map((room, i) => (
             <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
@@ -356,7 +298,6 @@ const Dashboard = ({ overview }) => {
           ))}
         </div>
 
-        {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-4">Revenue by Room Type</h3>
@@ -480,7 +421,6 @@ const Dashboard = ({ overview }) => {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
-            {/* Left: logo + title */}
             <div className="flex items-center gap-3">
               <Image src="/rs-logo2.png" alt="Reserved Suites" width={40} height={40} priority />
               <div>
@@ -489,7 +429,6 @@ const Dashboard = ({ overview }) => {
               </div>
             </div>
 
-            {/* Right: last updated */}
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
