@@ -519,7 +519,7 @@ const Dashboard = ({ overview }) => {
               key={tab.id}
               onClick={() => setSelectedView(tab.id)}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedView === tab.id ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <tab.icon className="w-4 h-4 mr-2" />
