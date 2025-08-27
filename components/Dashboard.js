@@ -45,10 +45,7 @@ function normalizeOverview(raw = {}) {
   // daily series (with aliases)
   const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows'], []) || [];
   const dailyData = dailyRaw.map((d, i) => {
-    const day =
-      d.day ??
-      (d.date ? new Date(d.date).getUTCDate() : i + 1);
-
+    const day = d.day ?? (d.date ? new Date(d.date).getUTCDate() : i + 1);
     return {
       day,
       date: d.date,
@@ -148,22 +145,24 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ reusable bits ------------------------------ */
 
-  const MetricCard = ({ title, value, subtitle, icon: Icon, color = 'blue' }) => {
-    const colorClasses = {
-      blue: 'bg-blue-50 border-blue-200 text-blue-800',
-      red: 'bg-red-50 border-red-200 text-red-800',
-      green: 'bg-green-50 border-green-200 text-green-800',
-      yellow: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-    };
+  // Gold, white, hover-lift metric cards
+  const MetricCard = ({ title, value, subtitle, icon: Icon }) => {
     return (
-      <div className={`p-6 rounded-lg border-2 ${colorClasses[color]} bg-white shadow-lg`}>
-        <div className="flex items-center justify-between">
+      <div
+        className="
+          group rounded-xl border border-[#CBA135] bg-white
+          shadow-sm transition-all duration-200 transform-gpu
+          hover:-translate-y-1 hover:shadow-xl
+        "
+      >
+        <div className="flex items-center justify-between p-6">
           <div>
             <p className="text-sm font-medium text-gray-600">{title}</p>
             <p className="text-2xl font-bold text-gray-900">{value}</p>
             {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
           </div>
-          <div className={`p-3 rounded-full ${colorClasses[color]}`}>
+
+          <div className="p-3 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30">
             <Icon className="w-6 h-6" />
           </div>
         </div>
@@ -182,28 +181,24 @@ const Dashboard = ({ overview }) => {
           value={currency(ov.revenueToDate)}
           subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
           icon={DollarSign}
-          color="blue"
         />
         <MetricCard
           title="Occupancy Rate"
           value={pct(ov.occupancyRate)}
           subtitle={`vs ${pct(occupancyTargetPct)} target`}
           icon={Users}
-          color={ov.occupancyRate >= occupancyTargetPct ? 'green' : 'red'}
         />
         <MetricCard
           title="Average Room Rate"
           value={currency(ov.averageRoomRate)}
           subtitle="vs breakeven"
           icon={Home}
-          color={ov.averageRoomRate >= 1237 ? 'green' : 'yellow'}
         />
         <MetricCard
           title="Target Variance"
           value={currency(Math.abs(ov.targetVariance))}
           subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
           icon={Target}
-          color={ov.targetVariance >= 0 ? 'red' : 'green'}
         />
       </div>
 
@@ -278,10 +273,10 @@ const Dashboard = ({ overview }) => {
       <div className="space-y-8">
         {/* Summary Banner */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} color="blue" />
-          <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} color="green" />
-          <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} color="yellow" />
-          <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} color={rtAvgOcc >= 62 ? 'green' : 'red'} />
+          <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
+          <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
+          <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
+          <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
         {/* Controls */}
@@ -521,6 +516,8 @@ const Dashboard = ({ overview }) => {
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
+              type="button"
+              aria-current={selectedView === tab.id ? 'page' : undefined}
             >
               <tab.icon className="w-4 h-4 mr-2" />
               {tab.name}
