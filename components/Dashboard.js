@@ -118,6 +118,64 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
+  /* ---------- Custom Legend & Tooltip for Daily Revenue vs Target ---------- */
+
+  const LegendSwatch = ({ type }) => (
+    <span
+      style={{
+        width: 12,
+        height: 12,
+        display: 'inline-block',
+        borderRadius: 2,
+        background:
+          type === 'revenue'
+            ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)' // half red/half green
+            : '#000000',
+        border: '1px solid rgba(0,0,0,0.25)',
+      }}
+    />
+  );
+
+  const renderLegend = () => (
+    <div className="flex items-center justify-center gap-6 mt-2 text-sm">
+      <div className="flex items-center gap-2">
+        <LegendSwatch type="target" />
+        <span>Daily Target</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <LegendSwatch type="revenue" />
+        <span>Actual Revenue</span>
+      </div>
+    </div>
+  );
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload || !payload.length) return null;
+    const pData = payload[0]?.payload || {};
+    const hitTarget = num(pData.revenue) >= num(pData.target);
+    const revColor = hitTarget ? '#10B981' : '#EF4444';
+
+    return (
+      <div className="rounded-md bg-white shadow border p-3 text-sm">
+        <div className="font-medium mb-1">Day {label}</div>
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" />
+            <span>Daily Target</span>
+          </div>
+          <span className="font-medium">{currency(pData.target)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-6 mt-1">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} />
+            <span>Actual Revenue</span>
+          </div>
+          <span className="font-medium" style={{ color: revColor }}>{currency(pData.revenue)}</span>
+        </div>
+      </div>
+    );
+  };
+
   /* ------------------------------ VIEWS ------------------------------ */
 
   const OverviewView = () => (
@@ -193,17 +251,14 @@ const Dashboard = ({ overview }) => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
                 <YAxis />
-                <RechartsTooltip formatter={(value) => [`${currency(value)}`, '']} />
-                <Legend />
+                <RechartsTooltip content={<CustomTooltip />} />
+                <Legend content={renderLegend} />
                 {/* Target = black */}
                 <Bar dataKey="target" name="Daily Target" fill="#000000" />
                 {/* Revenue = red, turns green if >= target */}
                 <Bar dataKey="revenue" name="Actual Revenue">
                   {ov.dailyData.map((d, i) => (
-                    <Cell
-                      key={`rev-${i}`}
-                      fill={d.revenue >= d.target ? '#10B981' : '#EF4444'}
-                    />
+                    <Cell key={`rev-${i}`} fill={d.revenue >= d.target ? '#10B981' : '#EF4444'} />
                   ))}
                 </Bar>
               </BarChart>
