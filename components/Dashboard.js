@@ -53,6 +53,19 @@ function normalizeOverview(raw = {}) {
   return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
 }
 
+/* ------------------------------ brand palettes (with gradients) ------------------------------ */
+
+const ROOM_PALETTES = {
+  '2 Bed':         { start: '#0A2240', end: '#0F2E5E' }, // Deep Navy Blue
+  '1 Bed':         { start: '#708090', end: '#5F6B7A' }, // Slate Gray
+  'Deluxe Studio': { start: '#B38B6D', end: '#A17855' }, // Warm Taupe
+  'Queen':         { start: '#D4AF37', end: '#C29D2C' }, // Soft Gold
+  'Queen Room':    { start: '#D4AF37', end: '#C29D2C' }, // alias
+};
+
+const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' }; // fallback
+const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
@@ -61,13 +74,12 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ derived data ------------------------------ */
 
-  const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#06B6D4'];
-
+  // Room types: fallback + normalization
   const fallbackRoomTypeData = [
-    { type: 'Queen', rooms: 26, available: 806, sold: 247, revenue: 212699, rate: 861, occupancy: 31 },
-    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 129, revenue: 106721, rate: 827, occupancy: 42 },
-    { type: '1 Bed', rooms: 16, available: 496, sold: 258, revenue: 279158, rate: 1082, occupancy: 52 },
-    { type: '2 Bed', rooms: 7, available: 217, sold: 129, revenue: 176339, rate: 1367, occupancy: 59 }
+    { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
+    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
+    { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
+    { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
   ];
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : fallbackRoomTypeData;
 
@@ -81,12 +93,14 @@ const Dashboard = ({ overview }) => {
     return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
   });
 
+  // Summary stats
   const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
   const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
+  // Historical fallback
   const fallbackYearlyData = [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
@@ -98,7 +112,6 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct   = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const occupancyTargetPct   = 62;
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
-
   const breakevenRate = 1237;
 
   /* ------------------------------ reusable bits ------------------------------ */
@@ -123,14 +136,10 @@ const Dashboard = ({ overview }) => {
   const LegendSwatch = ({ type }) => (
     <span
       style={{
-        width: 12,
-        height: 12,
-        display: 'inline-block',
-        borderRadius: 2,
-        background:
-          type === 'revenue'
-            ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)' // half red/half green
-            : '#000000',
+        width: 12, height: 12, display: 'inline-block', borderRadius: 2,
+        background: type === 'revenue'
+          ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)'
+          : '#000000',
         border: '1px solid rgba(0,0,0,0.25)',
       }}
     />
@@ -272,9 +281,9 @@ const Dashboard = ({ overview }) => {
   );
 
   const RoomTypesView = () => {
-    const [sortBy, setSortBy] = useState('revenue');
+    const [sortBy, setSortBy] = useState('revenue'); // revenue | occupancy | rate | sold
     const [asc, setAsc] = useState(false);
-    const [compact, setCompact] = useState(false);
+    const [compact, setCompact] = useState(true);    // default density = Compact ✅
 
     const sorted = useMemo(() => {
       const keyMap = {
@@ -302,7 +311,11 @@ const Dashboard = ({ overview }) => {
         <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Sort by</label>
-            <select className="border rounded-md px-2 py-1 text-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <select
+              className="border rounded-md px-2 py-1 text-sm"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
               <option value="revenue">Revenue</option>
               <option value="occupancy">Occupancy</option>
               <option value="rate">ADR</option>
@@ -335,61 +348,83 @@ const Dashboard = ({ overview }) => {
 
         {/* Cards Grid */}
         <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
-          {sorted.map((room, i) => (
-            <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-lg font-semibold">{room.type}</h4>
-                  <p className="text-xs text-gray-500">{num(room.sold)}/{num(room.available)} sold</p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <div title="Month-to-date revenue">
-                  <p className="text-gray-500">Revenue</p>
-                  <p className="font-semibold">{currency(room.revenue)}</p>
-                </div>
-                <div title="Average daily rate (ADR)">
-                  <p className="text-gray-500">ADR</p>
-                  <p className="font-semibold">{currency(room.rate)}</p>
-                </div>
-                <div className="col-span-2" title="Occupancy (sold ÷ available)">
-                  <p className="text-gray-500 mb-1">Occupancy</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="h-2 rounded-full"
-                      style={{
-                        width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
-                        backgroundColor: colors[i % colors.length],
-                      }}
-                    />
+          {sorted.map((room, i) => {
+            const pal = getPalette(room.type);
+            return (
+              <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-lg font-semibold">{room.type}</h4>
+                    <p className="text-xs text-gray-500">{num(room.sold)}/{num(room.available)} sold</p>
                   </div>
-                  <p className="mt-1 text-xs text-gray-600">{pct(room.occupancy)}</p>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div title="Month-to-date revenue">
+                    <p className="text-gray-500">Revenue</p>
+                    <p className="font-semibold">{currency(room.revenue)}</p>
+                  </div>
+                  <div title="Average daily rate (ADR)">
+                    <p className="text-gray-500">ADR</p>
+                    <p className="font-semibold">{currency(room.rate)}</p>
+                  </div>
+                  <div className="col-span-2" title="Occupancy (sold ÷ available)">
+                    <p className="text-gray-500 mb-1">Occupancy</p>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
+                          background: `linear-gradient(90deg, ${pal.start}, ${pal.end})`,
+                        }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600">{pct(room.occupancy)}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Revenue by Room Type (Pie) */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-4">Revenue by Room Type</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
+                  <defs>
+                    {roomTypeData.map((r) => {
+                      const pal = getPalette(r.type);
+                      const id = gradIdFor(r.type);
+                      return (
+                        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1" key={id}>
+                          <stop offset="0%" stopColor={pal.start} />
+                          <stop offset="100%" stopColor={pal.end} />
+                        </linearGradient>
+                      );
+                    })}
+                  </defs>
                   <Pie
                     data={roomTypeData}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ type, percent }) => `${type} ${(percent * 100).toFixed(0)}%`}
+                    label={({ payload, percent, x, y, textAnchor }) => {
+                      const pal = getPalette(payload.type);
+                      return (
+                        <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
+                          {payload.type} {(percent * 100).toFixed(0)}%
+                        </text>
+                      );
+                    }}
                     outerRadius={80}
-                    fill="#8884d8"
                     dataKey="revenue"
                   >
-                    {roomTypeData.map((_, idx) => (
-                      <Cell key={`cell-${idx}`} fill={colors[idx % colors.length]} />
+                    {roomTypeData.map((r, idx) => (
+                      <Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />
                     ))}
                   </Pie>
                   <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
@@ -398,6 +433,7 @@ const Dashboard = ({ overview }) => {
             </div>
           </div>
 
+          {/* Occupancy vs ADR (kept metric colors) */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-4">Occupancy vs ADR</h3>
             <div className="h-80">
