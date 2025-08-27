@@ -248,13 +248,10 @@ const Dashboard = ({ overview }) => {
         <div className="h-80">
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={ov.dailyData}
-                margin={{ top: 28, right: 24, bottom: 12, left: 8 }}
-              >
+              <BarChart data={ov.dailyData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
-                <YAxis tickMargin={10} />
+                <YAxis />
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
                 <Bar dataKey="target" name="Daily Target" fill="#000000" />
@@ -439,13 +436,10 @@ const Dashboard = ({ overview }) => {
 
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={roomTypeData}
-                  margin={{ top: 28, right: 24, bottom: 12, left: 8 }}
-                >
+                <BarChart data={roomTypeData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
-                  <YAxis tickMargin={10} />
+                  <YAxis />
                   <RechartsTooltip formatter={(value, name) => {
                     if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
                     if (name === 'rate') return [currency(value), 'ADR'];
@@ -470,15 +464,12 @@ const Dashboard = ({ overview }) => {
           <h3 className="text-lg font-semibold mb-4">Annual Revenue Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={yearlyData}
-                margin={{ top: 28, right: 24, bottom: 12, left: 8 }}
-              >
+              <LineChart data={yearlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis tickMargin={10} />
+                <YAxis />
                 <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
-                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} dot />
+                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -488,15 +479,12 @@ const Dashboard = ({ overview }) => {
           <h3 className="text-lg font-semibold mb-4">Occupancy Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={yearlyData}
-                margin={{ top: 28, right: 24, bottom: 12, left: 8 }}
-              >
+              <LineChart data={yearlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis tickMargin={10} />
+                <YAxis />
                 <RechartsTooltip formatter={(value) => [`${Math.round(num(value))}%`, 'Occupancy']} />
-                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} dot />
+                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -594,4 +582,4 @@ const Dashboard = ({ overview }) => {
   );
 };
 
-export default Dashboard;
+export default Dashboard
