@@ -1,13 +1,14 @@
 import { useUser, withPageAuthRequired } from '@auth0/nextjs-auth0/client';
 import Link from 'next/link';
 import Dashboard from '../components/Dashboard';
-import PageTitle from '../components/PageTitle';
+import PageTitle from '../components/PageTitle'; // ⬅️ add this
 
 function Home({ overview }) {
   const { user, isLoading } = useUser();
   if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   return (
     <div>
+      {/* top welcome bar */}
       <div className="bg-gray-800 text-white px-4 py-2">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="text-sm">
@@ -16,6 +17,13 @@ function Home({ overview }) {
           <Link href="/api/auth/logout" className="text-sm hover:text-gray-300 underline">Sign Out</Link>
         </div>
       </div>
+
+      {/* ⬇️ place the logo + title here */}
+      <div className="max-w-7xl mx-auto px-4">
+        <PageTitle title="Reserved Suites Illovo" subtitle="Revenue Dashboard" />
+      </div>
+
+      {/* main dashboard */}
       <Dashboard overview={overview} />
     </div>
   );
