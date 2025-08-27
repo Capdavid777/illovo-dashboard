@@ -1,6 +1,0 @@
-node_modules
-.env
-creds/
-playwright-downloads/
-
-Add .gitignore for MCP
