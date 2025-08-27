@@ -1,6 +1,7 @@
 import { useUser, withPageAuthRequired } from '@auth0/nextjs-auth0/client';
 import Link from 'next/link';
 import Dashboard from '../components/Dashboard';
+import PageTitle from '../components/PageTitle';
 
 function Home({ overview }) {
   const { user, isLoading } = useUser();
