@@ -63,7 +63,6 @@ const Dashboard = ({ overview }) => {
 
   const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#06B6D4'];
 
-  // Room types: fallback + normalization
   const fallbackRoomTypeData = [
     { type: 'Queen', rooms: 26, available: 806, sold: 247, revenue: 212699, rate: 861, occupancy: 31 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 129, revenue: 106721, rate: 827, occupancy: 42 },
@@ -100,7 +99,6 @@ const Dashboard = ({ overview }) => {
   const occupancyTargetPct   = 62;
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
 
-  // ⬇️ Breakeven ARR used for subtitle
   const breakevenRate = 1237;
 
   /* ------------------------------ reusable bits ------------------------------ */
@@ -141,7 +139,7 @@ const Dashboard = ({ overview }) => {
         <MetricCard
           title="Average Room Rate"
           value={currency(ov.averageRoomRate)}
-          subtitle={`vs breakeven ${currency(breakevenRate)}`}   // ⬅️ shows the actual breakeven ARR
+          subtitle={`vs breakeven ${currency(breakevenRate)}`}
           icon={Home}
         />
         <MetricCard
@@ -155,24 +153,32 @@ const Dashboard = ({ overview }) => {
       {/* Progress Bars */}
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-lg font-semibold mb-4">Progress to Breakeven</h3>
-        <div className="space-y-4">
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-              <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div className="bg-blue-600 h-3 rounded-full" style={{ width: `${revenueProgressPct}%` }} />
-            </div>
+
+        {/* Revenue */}
+        <div className="space-y-2 mb-4">
+          <div className="flex justify-between">
+            <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
+            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
-          <div>
-            <div className="flex justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-              <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-3">
-              <div className="bg-green-600 h-3 rounded-full" style={{ width: `${occupancyProgressPct}%` }} />
-            </div>
+          <div className="w-full bg-gray-200 rounded-full h-3">
+            <div
+              className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
+              style={{ width: `${revenueProgressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Occupancy */}
+        <div className="space-y-2">
+          <div className="flex justify-between">
+            <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
+            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-3">
+            <div
+              className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
+              style={{ width: `${occupancyProgressPct}%` }}
+            />
           </div>
         </div>
       </div>
@@ -220,6 +226,7 @@ const Dashboard = ({ overview }) => {
 
     return (
       <div className="space-y-8">
+        {/* Summary Banner */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
           <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
@@ -227,6 +234,7 @@ const Dashboard = ({ overview }) => {
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
+        {/* Controls */}
         <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Sort by</label>
@@ -261,6 +269,7 @@ const Dashboard = ({ overview }) => {
           </div>
         </div>
 
+        {/* Cards Grid */}
         <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
           {sorted.map((room, i) => (
             <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
@@ -298,6 +307,7 @@ const Dashboard = ({ overview }) => {
           ))}
         </div>
 
+        {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-4">Revenue by Room Type</h3>
@@ -421,6 +431,7 @@ const Dashboard = ({ overview }) => {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
+            {/* Left: logo + title */}
             <div className="flex items-center gap-3">
               <Image src="/rs-logo2.png" alt="Reserved Suites" width={40} height={40} priority />
               <div>
@@ -429,6 +440,7 @@ const Dashboard = ({ overview }) => {
               </div>
             </div>
 
+            {/* Right: last updated */}
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
