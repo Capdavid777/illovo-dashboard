@@ -195,8 +195,17 @@ const Dashboard = ({ overview }) => {
                 <YAxis />
                 <RechartsTooltip formatter={(value) => [`${currency(value)}`, '']} />
                 <Legend />
-                <Bar dataKey="target" fill="#E5E7EB" name="Daily Target" />
-                <Bar dataKey="revenue" fill="#3B82F6" name="Actual Revenue" />
+                {/* Target = black */}
+                <Bar dataKey="target" name="Daily Target" fill="#000000" />
+                {/* Revenue = red, turns green if >= target */}
+                <Bar dataKey="revenue" name="Actual Revenue">
+                  {ov.dailyData.map((d, i) => (
+                    <Cell
+                      key={`rev-${i}`}
+                      fill={d.revenue >= d.target ? '#10B981' : '#EF4444'}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           ) : (
