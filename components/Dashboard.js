@@ -160,7 +160,6 @@ const Dashboard = ({ overview }) => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
-    the
     const hitTarget = num(pData.revenue) >= num(pData.target);
     const revColor = hitTarget ? '#10B981' : '#EF4444';
 
