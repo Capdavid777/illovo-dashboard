@@ -14,8 +14,29 @@ import {
 
 /* ------------------------------ helpers ------------------------------ */
 
-const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
-const asPercent = (v, d = 0) => { const n = num(v, d); return !Number.isFinite(n) ? d : (n <= 1.5 ? n * 100 : n); };
+// Robust number parser: handles "R 45,263.50", "48%", "1,234", "0.62", etc.
+const num = (v, d = 0) => {
+  if (v == null) return d;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : d;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s === '') return d;
+    const isPercent = /%$/.test(s);
+    // Keep digits, dot and minus; strip currency symbols, spaces, commas, etc.
+    const cleaned = s.replace(/[^0-9.-]+/g, '');
+    const n = cleaned === '' ? NaN : Number(cleaned);
+    if (!Number.isFinite(n)) return d;
+    return isPercent ? n / 100 : n;
+  }
+  return d;
+};
+
+// If 0..1 treat as ratio→%, otherwise assume already % number
+const asPercent = (v, d = 0) => {
+  const n = num(v, d);
+  return n <= 1.5 ? n * 100 : n;
+};
+
 const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -180,7 +201,7 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
-  const [sourceInfo, setSourceInfo] = useState(null); // <— debug: which source & why
+  const [sourceInfo, setSourceInfo] = useState(null); // debug chip
 
   // Optional bounds
   useEffect(() => {
@@ -197,7 +218,7 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------- MAIN LOADER: admin-bucket → DB APIs → static ----------
+  // MAIN LOADER: admin-bucket → DB APIs → static
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -209,7 +230,7 @@ const Dashboard = ({ overview }) => {
     };
 
     async function load() {
-      // 1) Admin bucket via /api/month (if you added it)
+      // 1) Admin bucket via /api/month (if present)
       try {
         const r1 = await fetch(`/api/month?month=${month}`, {
           cache: 'no-store',
@@ -273,7 +294,6 @@ const Dashboard = ({ overview }) => {
         record({ source: 'static (/public/data)', error: String(e) });
       }
 
-      // If everything failed
       if (alive) { setMonthOverview(null); setLoading(false); }
     }
 
@@ -395,19 +415,19 @@ const Dashboard = ({ overview }) => {
         <div className="space-y-2 mb-4">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
+            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.targetToDate ? ov.revenueToDate / ov.targetToDate : 0))}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
+            <div className={`h-3 rounded-full ${ov.revenueToDate >= ov.targetToDate ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${ov.targetToDate ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0}%` }} />
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
+            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.occupancyRate / 62))}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
+            <div className={`h-3 rounded-full ${ov.occupancyRate >= 62 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${Math.round(100 * clamp01(ov.occupancyRate / 62))}%` }} />
           </div>
         </div>
       </div>
@@ -689,7 +709,6 @@ const Dashboard = ({ overview }) => {
                 <p className="text-sm font-medium">
                   {ov.lastUpdated ? new Date(ov.lastUpdated).toLocaleDateString() : new Date().toLocaleDateString()}
                 </p>
-                {/* tiny source chip */}
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
