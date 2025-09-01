@@ -1,5 +1,5 @@
 // components/Dashboard.js
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -9,6 +9,10 @@ import {
   Activity, Calendar, DollarSign, Home, Target, Users,
   ArrowUpDown, SlidersHorizontal
 } from 'lucide-react';
+
+// ▼ NEW: Month controls + URL param hook
+import MonthSwitcher from './MonthSwitcher';            // create as shown earlier
+import { useMonthParam } from '../hooks/useMonthParam'; // create as shown earlier
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -20,6 +24,12 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 // ↓ make Y-axis ticks a bit smaller so top labels fit
 const Y_TICK_SMALL = { fontSize: 11 };
+
+// Month utils (kept local so this file is self-contained)
+const pad2 = (n) => String(n).padStart(2, '0');
+const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+
+/* ------------------------------ data normalization ------------------------------ */
 
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
@@ -71,8 +81,48 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
-  const [selectedView, setSelectedView] = useState('overview');
-  const ov = useMemo(() => normalizeOverview(overview), [overview]);
+  // ▼ NEW: month state synced to URL (?month=YYYY-MM), plus bounds & loading
+  const { month, setMonth } = useMonthParam();
+  const [minKey, setMinKey] = useState();
+  const [maxKey, setMaxKey] = useState();
+  const [monthOverview, setMonthOverview] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // Load available bounds from /public/data/index.json if present
+  useEffect(() => {
+    let alive = true;
+    fetch('/data/index.json')
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive || !j) return;
+        if (j.min) setMinKey(j.min);
+        if (j.max) setMaxKey(j.max);
+        // If month is outside provided max, snap to latest file available
+        if (j.max && month > j.max) setMonth(j.max);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load the selected month’s JSON (shape compatible with your existing `overview`)
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch(`/data/${month}.json`, { cache: 'no-store' })
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive) return;
+        // Accept either {overview: {...}} or raw overview payload
+        setMonthOverview(j?.overview || j || null);
+        setLoading(false);
+      })
+      .catch(() => { if (alive) { setMonthOverview(null); setLoading(false); } });
+    return () => { alive = false; };
+  }, [month]);
+
+  // Prefer loaded month data; fall back to prop
+  const rawForNormalize = monthOverview || overview || {};
+  const ov = useMemo(() => normalizeOverview(rawForNormalize), [rawForNormalize]);
 
   /* ------------------------------ derived data ------------------------------ */
 
@@ -425,12 +475,12 @@ const Dashboard = ({ overview }) => {
               <summary className="cursor-pointer select-none text-gray-700">How to read this</summary>
               <div className="mt-2 leading-relaxed">
                 <p className="mb-1">
-                  The chart compares each room type’s <span className="font-medium">Occupancy (%)</span> with its
-                  {' '}<span className="font-medium">Average Daily Rate (ADR)</span> so you can see how price and demand line up:
+                  The chart compares each room type’s <span className="font-medium">Occupancy (%)</span> with its{' '}
+                  <span className="font-medium">Average Daily Rate (ADR)</span>.
                 </p>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><span className="font-medium">High ADR + low occupancy</span> → likely overpriced; consider discounting or promos.</li>
-                  <li><span className="font-medium">Low ADR + high occupancy</span> → room type is underpriced; test a rate increase.</li>
+                  <li><span className="font-medium">Low ADR + high occupancy</span> → underpriced; test a rate increase.</li>
                   <li><span className="font-medium">Both high</span> → star performer; protect rate and allocate inventory.</li>
                   <li><span className="font-medium">Both low</span> → weak product; repackage or reposition.</li>
                 </ul>
@@ -539,15 +589,35 @@ const Dashboard = ({ overview }) => {
                 <p className="text-sm text-gray-500">Revenue Dashboard</p>
               </div>
             </div>
+
+            {/* ▼ NEW: Month switcher + last updated */}
             <div className="flex items-center space-x-4">
+              <MonthSwitcher
+                monthKey={month}
+                onChange={setMonth}
+                minKey={minKey}
+                maxKey={maxKey}
+              />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
                 <p className="text-sm font-medium">
-                  {ov.lastUpdated ? new Date(ov.lastUpdated).toLocaleDateString() : new Date().toLocaleDateString()}
+                  {ov.lastUpdated
+                    ? new Date(ov.lastUpdated).toLocaleDateString()
+                    : new Date().toLocaleDateString()}
                 </p>
               </div>
             </div>
           </div>
+
+          {/* Optional: a thin status line for data loading/errors */}
+          {loading && (
+            <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>
+          )}
+          {!loading && !monthOverview && (
+            <div className="pb-3 text-sm text-red-600">
+              No data file found for {month}. Add <code>/public/data/{month}.json</code> or adjust your loader.
+            </div>
+          )}
         </div>
       </div>
 
