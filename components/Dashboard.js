@@ -14,7 +14,6 @@ import {
 
 /* ------------------------------ helpers ------------------------------ */
 
-// Robust number parser: "R 45,263.50" → 45263.5, "48%" → 0.48 (then asPercent() turns to 48)
 const num = (v, d = 0) => {
   if (v == null) return d;
   if (typeof v === 'number') return Number.isFinite(v) ? v : d;
@@ -22,7 +21,7 @@ const num = (v, d = 0) => {
     const s = v.trim();
     if (s === '') return d;
     const isPercent = /%$/.test(s);
-    const cleaned = s.replace(/[^0-9.-]+/g, ''); // strip R, commas, spaces
+    const cleaned = s.replace(/[^0-9.-]+/g, '');
     const n = cleaned === '' ? NaN : Number(cleaned);
     if (!Number.isFinite(n)) return d;
     return isPercent ? n / 100 : n;
@@ -31,13 +30,12 @@ const num = (v, d = 0) => {
 };
 const asPercent = (v, d = 0) => {
   const n = num(v, d);
-  return n <= 1.5 ? n * 100 : n; // ratio→%
+  return n <= 1.5 ? n * 100 : n;
 };
 const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
-
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
 /* ------------------------------ month utils ------------------------------ */
@@ -99,16 +97,11 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
 
 /* ------------------------------ deep helpers for normalization ------------------------------ */
 
-// Return the first array likely to be "daily rows"
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
   const candidates = [];
-
-  // direct common keys
   const directKeys = ['dailySeries', 'daily', 'items', 'rows', 'days', 'data'];
   for (const k of directKeys) if (Array.isArray(raw[k])) candidates.push(raw[k]);
-
-  // object-of-days: {"1":{...},"2":{...}}
   const objDaily = raw.daily || raw.days || null;
   if (objDaily && !Array.isArray(objDaily) && typeof objDaily === 'object') {
     const keys = Object.keys(objDaily).filter((k) => /^\d+$/.test(k));
@@ -117,31 +110,20 @@ function sniffDailyArray(raw) {
       candidates.push(arr);
     }
   }
-
-  // scan top-level values for arrays of objects with 20..35 items
   for (const v of Object.values(raw)) {
-    if (Array.isArray(v) && v.length >= 10 && v.length <= 40 && v.every((x) => x && typeof x === 'object')) {
-      candidates.push(v);
-    }
+    if (Array.isArray(v) && v.length >= 10 && v.length <= 40 && v.every((x) => x && typeof x === 'object')) candidates.push(v);
   }
-
-  // nested one level
   for (const v of Object.values(raw)) {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       for (const vv of Object.values(v)) {
-        if (Array.isArray(vv) && vv.length >= 10 && vv.length <= 40 && vv.every((x) => x && typeof x === 'object')) {
-          candidates.push(vv);
-        }
+        if (Array.isArray(vv) && vv.length >= 10 && vv.length <= 40 && vv.every((x) => x && typeof x === 'object')) candidates.push(vv);
       }
     }
   }
-
-  // choose the longest as best guess
   candidates.sort((a, b) => b.length - a.length);
   return candidates[0] || [];
 }
 
-// Heuristic mapping of a single daily record
 function mapDailyRow(d, i) {
   if (!d || typeof d !== 'object') return null;
   const keys = Object.keys(d);
@@ -150,7 +132,6 @@ function mapDailyRow(d, i) {
       const hit = keys.find((k) => k.toLowerCase() === String(name).toLowerCase());
       if (hit) return d[hit];
     }
-    // loose contains (e.g., "accommodation_revenue")
     for (const name of names) {
       const hit = keys.find((k) => k.toLowerCase().includes(String(name).toLowerCase()));
       if (hit) return d[hit];
@@ -160,26 +141,16 @@ function mapDailyRow(d, i) {
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
   const date = lookup(['date', 'dt', 'dayDate']);
-
-  const revenue = num(lookup([
-    'revenue', 'actual', 'actualRevenue', 'accommodationRevenue', 'accommRevenue', 'accomRevenue',
-    'accRevenue', 'totalRevenue', 'rev', 'income'
-  ]), NaN);
-
-  const target = num(lookup([
-    'target', 'dailyTarget', 'targetRevenue', 'budget', 'goal', 'forecast'
-  ]), NaN);
-
-  const rate = num(lookup(['rate', 'arr', 'adr', 'averageRate', 'avgRate']), NaN);
-
-  const occVal = lookup(['occupancy', 'occ', 'occupancyRate', 'occRate', 'occ%']);
+  const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
+  const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
+  const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
+  const occVal  = lookup(['occupancy','occ','occupancyRate','occRate','occ%']);
   const occupancy = asPercent(occVal ?? NaN, NaN);
-
-  const metFlag = lookup(['met', 'hitTarget', 'metTarget']);
+  const metFlag = lookup(['met','hitTarget','metTarget']);
 
   return {
     day: Number.isFinite(day) ? day : (date ? new Date(date).getDate() : i + 1),
-    date: date,
+    date,
     revenue: Number.isFinite(revenue) ? revenue : 0,
     target: Number.isFinite(target) ? target : 0,
     rate: Number.isFinite(rate) ? rate : 0,
@@ -193,40 +164,30 @@ function mapDailyRow(d, i) {
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
 
-  // Daily rows first (many totals can be rebuilt from these)
   let dailyArr = sniffDailyArray(raw);
   if (!Array.isArray(dailyArr)) dailyArr = [];
   const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
 
-  // Totals (with fallbacks to daily sums)
-  let revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], NaN));
-  let targetToDate    = num(get(['targetToDate', 'target_to_date', 'target'], NaN));
-  let averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr', 'adr'], NaN));
-
-  let occupancyRate   = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
+  let revenueToDate   = num(get(['revenueToDate','revenue_to_date','revenue'], NaN));
+  let targetToDate    = num(get(['targetToDate','target_to_date','target'], NaN));
+  let averageRoomRate = num(get(['averageRoomRate','avgRoomRate','arr','adr'], NaN));
+  let occupancyRate   = get(['occupancyRate','occupancy_to_date','occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  if (!Number.isFinite(revenueToDate) && dailyData.length) {
-    revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
-  }
-  if (!Number.isFinite(targetToDate) && dailyData.length) {
-    targetToDate = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
-  }
+  if (!Number.isFinite(revenueToDate) && dailyData.length) revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
+  if (!Number.isFinite(targetToDate)  && dailyData.length) targetToDate  = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
   if (!Number.isFinite(occupancyRate) && dailyData.length) {
     const vals = dailyData.map((d) => num(d.occupancy)).filter((n) => Number.isFinite(n));
     occupancyRate = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   }
-
   if (!Number.isFinite(averageRoomRate)) averageRoomRate = 0;
 
-  // Sort daily by day asc (in case input was unordered)
   dailyData.sort((a, b) => a.day - b.day);
 
   const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) - (Number.isFinite(revenueToDate) ? revenueToDate : 0);
-  const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
-
-  const roomTypesRaw = get(['roomTypes', 'roomTypesData'], null);
-  const historyRaw   = get(['history', 'yearlyData'], null);
+  const lastUpdated = get(['lastUpdated','updatedAt','last_updated'], null);
+  const roomTypesRaw = get(['roomTypes','roomTypesData'], null);
+  const historyRaw   = get(['history','yearlyData'], null);
 
   return {
     revenueToDate: Number.isFinite(revenueToDate) ? revenueToDate : 0,
@@ -262,8 +223,8 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
-  const [sourceInfo, setSourceInfo] = useState(null); // which source
-  const [rawSlice, setRawSlice] = useState(null);     // inspector raw sample
+  const [sourceInfo, setSourceInfo] = useState(null);
+  const [rawSlice, setRawSlice] = useState(null);
 
   const debugOn = (() => {
     if (typeof window === 'undefined') return false;
@@ -274,7 +235,6 @@ const Dashboard = ({ overview }) => {
     try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
   })();
 
-  // Optional month bounds
   useEffect(() => {
     let alive = true;
     fetch('/data/index.json').then(r => r.ok ? r.json() : null).then((j) => {
@@ -286,7 +246,6 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // MAIN LOADER: admin-bucket → DB APIs → static
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -300,7 +259,6 @@ const Dashboard = ({ overview }) => {
       if (r.ok && isJson(r)) {
         const j = await r.json();
         if (inspectOn && !rawSlice) {
-          // keep a small slice for the inspector
           const slice = Array.isArray(j) ? j.slice(0, 3) : (typeof j === 'object' ? Object.fromEntries(Object.entries(j).slice(0, 20)) : j);
           setRawSlice({ tag, slice });
         }
@@ -310,7 +268,6 @@ const Dashboard = ({ overview }) => {
     }
 
     (async () => {
-      // 1) Admin bucket via /api/month
       try {
         const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
@@ -322,7 +279,6 @@ const Dashboard = ({ overview }) => {
         }
       } catch (e) { record({ source: 'admin-bucket', error: String(e) }); }
 
-      // 2) Admin DB endpoints
       try {
         const [ov, dm] = await Promise.all([
           tryJson(`/api/overview?month=${month}`, 'admin-db/overview'),
@@ -342,7 +298,6 @@ const Dashboard = ({ overview }) => {
         }
       } catch (e) { record({ source: 'admin-db', error: String(e) }); }
 
-      // 3) Static fallback
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
@@ -457,7 +412,6 @@ const Dashboard = ({ overview }) => {
 
   const OverviewView = () => (
     <div className="space-y-8">
-      {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
         <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
@@ -465,7 +419,6 @@ const Dashboard = ({ overview }) => {
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
 
-      {/* Progress Bars */}
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-lg font-semibold mb-4">Progress to Breakeven</h3>
         <div className="space-y-2 mb-4">
@@ -488,7 +441,6 @@ const Dashboard = ({ overview }) => {
         </div>
       </div>
 
-      {/* Daily Revenue Chart */}
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-lg font-semibold mb-4">Daily Revenue vs Target</h3>
         <div className="h-80">
@@ -539,7 +491,6 @@ const Dashboard = ({ overview }) => {
 
     return (
       <div className="space-y-8">
-        {/* Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
           <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
@@ -547,7 +498,6 @@ const Dashboard = ({ overview }) => {
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
-        {/* Controls */}
         <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Sort by</label>
@@ -572,7 +522,6 @@ const Dashboard = ({ overview }) => {
           </div>
         </div>
 
-        {/* Cards Grid */}
         <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
           {sorted.map((room, i) => {
             const pal = getPalette(room.type);
@@ -614,7 +563,6 @@ const Dashboard = ({ overview }) => {
           })}
         </div>
 
-        {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-2">Revenue by Room Type</h3>
@@ -737,14 +685,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------ layout + optional inspector ------------------------------ */
-
-  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
-    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
-    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
-    { year: '2024', roomsSold: 759, occupancy: 45, revenue: 701738, rate: 925 },
-    { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
-  ];
+  /* ------------------------------ layout & debug ------------------------------ */
 
   const Inspector = () => {
     if (!inspectOn) return null;
@@ -777,7 +718,6 @@ const Dashboard = ({ overview }) => {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -824,7 +764,6 @@ const Dashboard = ({ overview }) => {
 
       <Inspector />
 
-      {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex space-x-1">
           {[{ id: 'overview', name: 'Overview', icon: Activity }, { id: 'rooms', name: 'Room Types', icon: Home }, { id: 'historical', name: 'Historical', icon: Calendar }].map((tab) => (
@@ -837,7 +776,6 @@ const Dashboard = ({ overview }) => {
         </div>
       </div>
 
-      {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         {selectedView === 'overview' && <OverviewView />}
         {selectedView === 'rooms' && <RoomTypesView />}
