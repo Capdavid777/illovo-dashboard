@@ -298,7 +298,11 @@ const Dashboard = ({ overview }) => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
-    const hitTarget = num(pData.revenue) >= num(pData.target);
+    // tolerant check (±1% or R100) + explicit flag support
+    const rev = num(pData.revenue);
+    const tgt = num(pData.target);
+    const epsilon = Math.max(100, tgt * 0.01);
+    const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
     const revColor = hitTarget ? '#10B981' : '#EF4444';
 
     return (
@@ -373,9 +377,13 @@ const Dashboard = ({ overview }) => {
                 <Legend content={renderLegend} />
                 <Bar dataKey="target" name="Daily Target" fill="#000000" />
                 <Bar dataKey="revenue" name="Actual Revenue">
-                  {ov.dailyData.map((d, i) => (
-                    <Cell key={`rev-${i}`} fill={d.revenue >= d.target ? '#10B981' : '#EF4444'} />
-                  ))}
+                  {ov.dailyData.map((d, i) => {
+                    const rev = num(d.revenue);
+                    const tgt = num(d.target);
+                    const epsilon = Math.max(100, tgt * 0.01);
+                    const met = (d.met === true) || (rev + epsilon >= tgt);
+                    return <Cell key={`rev-${i}`} fill={met ? '#10B981' : '#EF4444'} />;
+                  })}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
