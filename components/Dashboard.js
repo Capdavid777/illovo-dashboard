@@ -14,7 +14,7 @@ import {
 
 /* ------------------------------ helpers ------------------------------ */
 
-// Robust number parser: handles "R 45,263.50", "48%", "1,234", "0.62", etc.
+// Robust number parser: "R 45,263.50" → 45263.5, "48%" → 0.48 (then asPercent() turns to 48)
 const num = (v, d = 0) => {
   if (v == null) return d;
   if (typeof v === 'number') return Number.isFinite(v) ? v : d;
@@ -22,30 +22,23 @@ const num = (v, d = 0) => {
     const s = v.trim();
     if (s === '') return d;
     const isPercent = /%$/.test(s);
-    // Keep digits, dot and minus; strip currency symbols, spaces, commas, etc.
-    const cleaned = s.replace(/[^0-9.-]+/g, '');
+    const cleaned = s.replace(/[^0-9.-]+/g, ''); // strip R, commas, spaces
     const n = cleaned === '' ? NaN : Number(cleaned);
     if (!Number.isFinite(n)) return d;
     return isPercent ? n / 100 : n;
   }
   return d;
 };
-
-// If 0..1 treat as ratio→%, otherwise assume already % number
 const asPercent = (v, d = 0) => {
   const n = num(v, d);
-  return n <= 1.5 ? n * 100 : n;
+  return n <= 1.5 ? n * 100 : n; // ratio→%
 };
-
 const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 
-const isJson = (res) => {
-  const ct = (res.headers.get('content-type') || '').toLowerCase();
-  return ct.includes('application/json');
-};
+const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
 /* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -60,12 +53,9 @@ function useMonthParam() {
   const current = () => toKey(new Date());
   const [month, setMonthState] = useState(() => {
     if (typeof window === 'undefined') return current();
-    try {
-      const u = new URL(window.location.href);
-      return u.searchParams.get('month') || current();
-    } catch { return current(); }
+    try { return new URL(window.location.href).searchParams.get('month') || current(); }
+    catch { return current(); }
   });
-
   const setMonth = (next) => {
     setMonthState(next);
     if (typeof window !== 'undefined') {
@@ -81,18 +71,8 @@ function useMonthParam() {
 
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
-  const prev = () => {
-    const nd = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-    const nk = toKey(nd);
-    if (minKey && nk < minKey) return;
-    onChange(nk);
-  };
-  const next = () => {
-    const nd = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    const nk = toKey(nd);
-    if (maxKey && nk > maxKey) return;
-    onChange(nk);
-  };
+  const prev = () => { const nk = toKey(new Date(d.getFullYear(), d.getMonth() - 1, 1)); if (!minKey || nk >= minKey) onChange(nk); };
+  const next = () => { const nk = toKey(new Date(d.getFullYear(), d.getMonth() + 1, 1)); if (!maxKey || nk <= maxKey) onChange(nk); };
 
   const options = (() => {
     const out = [];
@@ -103,29 +83,109 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     return out.reverse();
   })();
 
-  const canPrev = !minKey || monthKey > minKey;
-  const canNext = !maxKey || monthKey < maxKey;
-
   return (
     <div className="flex items-center gap-2">
-      <button onClick={prev} disabled={!canPrev}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
-        aria-label="Previous month" type="button">‹</button>
-
+      <button onClick={prev} disabled={minKey && monthKey <= minKey} className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10" aria-label="Previous month" type="button">‹</button>
       <div className="flex items-center gap-2 rounded-2xl border border-gray-300 px-3 py-2">
         <span className="font-medium whitespace-nowrap">{fmtMonth(d)}</span>
       </div>
-
-      <button onClick={next} disabled={!canNext}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
-        aria-label="Next month" type="button">›</button>
-
-      <select value={monthKey} onChange={(e) => onChange(e.target.value)}
-        className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm" aria-label="Jump to month">
+      <button onClick={next} disabled={maxKey && monthKey >= maxKey} className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10" aria-label="Next month" type="button">›</button>
+      <select value={monthKey} onChange={(e) => onChange(e.target.value)} className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm" aria-label="Jump to month">
         {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
       </select>
     </div>
   );
+}
+
+/* ------------------------------ deep helpers for normalization ------------------------------ */
+
+// Return the first array likely to be "daily rows"
+function sniffDailyArray(raw) {
+  if (!raw || typeof raw !== 'object') return [];
+  const candidates = [];
+
+  // direct common keys
+  const directKeys = ['dailySeries', 'daily', 'items', 'rows', 'days', 'data'];
+  for (const k of directKeys) if (Array.isArray(raw[k])) candidates.push(raw[k]);
+
+  // object-of-days: {"1":{...},"2":{...}}
+  const objDaily = raw.daily || raw.days || null;
+  if (objDaily && !Array.isArray(objDaily) && typeof objDaily === 'object') {
+    const keys = Object.keys(objDaily).filter((k) => /^\d+$/.test(k));
+    if (keys.length >= 10) {
+      const arr = keys.sort((a,b) => a - b).map((k) => ({ day: Number(k), ...objDaily[k] }));
+      candidates.push(arr);
+    }
+  }
+
+  // scan top-level values for arrays of objects with 20..35 items
+  for (const v of Object.values(raw)) {
+    if (Array.isArray(v) && v.length >= 10 && v.length <= 40 && v.every((x) => x && typeof x === 'object')) {
+      candidates.push(v);
+    }
+  }
+
+  // nested one level
+  for (const v of Object.values(raw)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const vv of Object.values(v)) {
+        if (Array.isArray(vv) && vv.length >= 10 && vv.length <= 40 && vv.every((x) => x && typeof x === 'object')) {
+          candidates.push(vv);
+        }
+      }
+    }
+  }
+
+  // choose the longest as best guess
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0] || [];
+}
+
+// Heuristic mapping of a single daily record
+function mapDailyRow(d, i) {
+  if (!d || typeof d !== 'object') return null;
+  const keys = Object.keys(d);
+  const lookup = (names) => {
+    for (const name of names) {
+      const hit = keys.find((k) => k.toLowerCase() === String(name).toLowerCase());
+      if (hit) return d[hit];
+    }
+    // loose contains (e.g., "accommodation_revenue")
+    for (const name of names) {
+      const hit = keys.find((k) => k.toLowerCase().includes(String(name).toLowerCase()));
+      if (hit) return d[hit];
+    }
+    return undefined;
+  };
+
+  const day = num(lookup(['day', 'd', 'dateDay']), NaN);
+  const date = lookup(['date', 'dt', 'dayDate']);
+
+  const revenue = num(lookup([
+    'revenue', 'actual', 'actualRevenue', 'accommodationRevenue', 'accommRevenue', 'accomRevenue',
+    'accRevenue', 'totalRevenue', 'rev', 'income'
+  ]), NaN);
+
+  const target = num(lookup([
+    'target', 'dailyTarget', 'targetRevenue', 'budget', 'goal', 'forecast'
+  ]), NaN);
+
+  const rate = num(lookup(['rate', 'arr', 'adr', 'averageRate', 'avgRate']), NaN);
+
+  const occVal = lookup(['occupancy', 'occ', 'occupancyRate', 'occRate', 'occ%']);
+  const occupancy = asPercent(occVal ?? NaN, NaN);
+
+  const metFlag = lookup(['met', 'hitTarget', 'metTarget']);
+
+  return {
+    day: Number.isFinite(day) ? day : (date ? new Date(date).getDate() : i + 1),
+    date: date,
+    revenue: Number.isFinite(revenue) ? revenue : 0,
+    target: Number.isFinite(target) ? target : 0,
+    rate: Number.isFinite(rate) ? rate : 0,
+    occupancy: Number.isFinite(occupancy) ? occupancy : 0,
+    met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
+  };
 }
 
 /* ------------------------------ normalization ------------------------------ */
@@ -133,51 +193,52 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
 
-  const revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], 0));
-  const targetToDate    = num(get(['targetToDate', 'target_to_date', 'target'], 0));
-  const averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr', 'adr'], 0));
-  let occupancyRate     = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
+  // Daily rows first (many totals can be rebuilt from these)
+  let dailyArr = sniffDailyArray(raw);
+  if (!Array.isArray(dailyArr)) dailyArr = [];
+  const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
+
+  // Totals (with fallbacks to daily sums)
+  let revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], NaN));
+  let targetToDate    = num(get(['targetToDate', 'target_to_date', 'target'], NaN));
+  let averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr', 'adr'], NaN));
+
+  let occupancyRate   = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows', 'days', 'data'], []) || [];
-  const dailyData = dailyRaw.map((d, i) => {
-    const g = (obj, ...keys) => {
-      for (const k of keys) {
-        if (obj[k] != null) return obj[k];
-        const hit = Object.keys(obj).find((kk) => kk.toLowerCase() === String(k).toLowerCase());
-        if (hit) return obj[hit];
-      }
-      return undefined;
-    };
-    const dd   = g(d, 'day') ?? (g(d, 'date') ? new Date(g(d, 'date')).getDate() : i + 1);
-    const rev  = num(g(d, 'revenue', 'actual', 'dailyRevenue', 'accommodationRevenue', 'totalRevenue'), 0);
-    const tgt  = num(g(d, 'target', 'targetRevenue', 'dailyTarget'), 0);
-    const rate = num(g(d, 'rate', 'arr', 'averageRate', 'adr'), 0);
-    const occ  = g(d, 'occupancy', 'occ', 'occupancyRate', 'occRate');
-    const metFlag = g(d, 'met', 'hitTarget', 'metTarget');
-
-    return {
-      day: dd,
-      date: g(d, 'date'),
-      target: tgt,
-      revenue: rev,
-      occupancy: asPercent(occ ?? 0, 0),
-      rate,
-      met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
-    };
-  });
-
-  if (!Number.isFinite(occupancyRate)) {
-    const vals = dailyData.map((d) => d.occupancy).filter((n) => Number.isFinite(n));
+  if (!Number.isFinite(revenueToDate) && dailyData.length) {
+    revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
+  }
+  if (!Number.isFinite(targetToDate) && dailyData.length) {
+    targetToDate = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
+  }
+  if (!Number.isFinite(occupancyRate) && dailyData.length) {
+    const vals = dailyData.map((d) => num(d.occupancy)).filter((n) => Number.isFinite(n));
     occupancyRate = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   }
 
-  const targetVariance = targetToDate - revenueToDate;
-  const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
-  const roomTypes   = get(['roomTypes', 'roomTypesData'], null);
-  const history     = get(['history', 'yearlyData'], null);
+  if (!Number.isFinite(averageRoomRate)) averageRoomRate = 0;
 
-  return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
+  // Sort daily by day asc (in case input was unordered)
+  dailyData.sort((a, b) => a.day - b.day);
+
+  const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) - (Number.isFinite(revenueToDate) ? revenueToDate : 0);
+  const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
+
+  const roomTypesRaw = get(['roomTypes', 'roomTypesData'], null);
+  const historyRaw   = get(['history', 'yearlyData'], null);
+
+  return {
+    revenueToDate: Number.isFinite(revenueToDate) ? revenueToDate : 0,
+    targetToDate:  Number.isFinite(targetToDate) ? targetToDate : 0,
+    averageRoomRate,
+    occupancyRate: Number.isFinite(occupancyRate) ? occupancyRate : 0,
+    targetVariance,
+    dailyData,
+    lastUpdated,
+    roomTypes: Array.isArray(roomTypesRaw) ? roomTypesRaw : null,
+    history: Array.isArray(historyRaw) ? historyRaw : null,
+  };
 }
 
 /* ------------------------------ palettes ------------------------------ */
@@ -201,20 +262,27 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
-  const [sourceInfo, setSourceInfo] = useState(null); // debug chip
+  const [sourceInfo, setSourceInfo] = useState(null); // which source
+  const [rawSlice, setRawSlice] = useState(null);     // inspector raw sample
 
-  // Optional bounds
+  const debugOn = (() => {
+    if (typeof window === 'undefined') return false;
+    try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
+  })();
+  const inspectOn = (() => {
+    if (typeof window === 'undefined') return false;
+    try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
+  })();
+
+  // Optional month bounds
   useEffect(() => {
     let alive = true;
-    fetch('/data/index.json')
-      .then(async (r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (!alive || !j) return;
-        if (j.min) setMinKey(j.min);
-        if (j.max) setMaxKey(j.max);
-        if (j.max && month > j.max) setMonth(j.max);
-      })
-      .catch(() => {});
+    fetch('/data/index.json').then(r => r.ok ? r.json() : null).then((j) => {
+      if (!alive || !j) return;
+      if (j.min) setMinKey(j.min);
+      if (j.max) setMaxKey(j.max);
+      if (j.max && month > j.max) setMonth(j.max);
+    }).catch(() => {});
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -223,97 +291,86 @@ const Dashboard = ({ overview }) => {
     let alive = true;
     setLoading(true);
     setSourceInfo(null);
+    setRawSlice(null);
 
-    const record = (info) => {
-      console.info('[Dashboard loader]', info);
-      if (alive) setSourceInfo(info);
-    };
+    const record = (info) => { console.info('[Dashboard loader]', info); if (alive) setSourceInfo(info); };
 
-    async function load() {
-      // 1) Admin bucket via /api/month (if present)
+    async function tryJson(url, tag) {
+      const r = await fetch(url, { cache: 'no-store', credentials: 'include', redirect: 'follow' });
+      if (r.ok && isJson(r)) {
+        const j = await r.json();
+        if (inspectOn && !rawSlice) {
+          // keep a small slice for the inspector
+          const slice = Array.isArray(j) ? j.slice(0, 3) : (typeof j === 'object' ? Object.fromEntries(Object.entries(j).slice(0, 20)) : j);
+          setRawSlice({ tag, slice });
+        }
+        return { ok: true, json: j, status: r.status };
+      }
+      return { ok: false, status: r.status, jsonCt: isJson(r) };
+    }
+
+    (async () => {
+      // 1) Admin bucket via /api/month
       try {
-        const r1 = await fetch(`/api/month?month=${month}`, {
-          cache: 'no-store',
-          credentials: 'include',
-          redirect: 'follow',
-        });
-        if (r1.ok && isJson(r1)) {
-          const j1 = await r1.json();
-          if (alive) { setMonthOverview(j1?.overview || j1 || null); setLoading(false); }
+        const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
+        if (r1.ok) {
+          if (alive) { setMonthOverview(r1.json?.overview || r1.json || null); setLoading(false); }
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
         } else {
-          record({ source: 'admin-bucket (/api/month)', status: r1.status, json: isJson(r1), skipped: true });
+          record({ source: 'admin-bucket (/api/month)', status: r1.status, json: r1.jsonCt, skipped: true });
         }
-      } catch (e) {
-        record({ source: 'admin-bucket (/api/month)', error: String(e) });
-      }
+      } catch (e) { record({ source: 'admin-bucket', error: String(e) }); }
 
-      // 2) DB-backed endpoints (admin portal)
+      // 2) Admin DB endpoints
       try {
-        const [ovRes, dmRes] = await Promise.all([
-          fetch(`/api/overview?month=${month}`,      { cache: 'no-store', credentials: 'include', redirect: 'follow' }),
-          fetch(`/api/daily-metrics?month=${month}`, { cache: 'no-store', credentials: 'include', redirect: 'follow' }),
+        const [ov, dm] = await Promise.all([
+          tryJson(`/api/overview?month=${month}`, 'admin-db/overview'),
+          tryJson(`/api/daily-metrics?month=${month}`, 'admin-db/daily'),
         ]);
-
-        const okOv = ovRes?.ok && isJson(ovRes);
-        const okDm = dmRes?.ok && isJson(dmRes);
-
-        if (okOv || okDm) {
-          const ovJson = okOv ? await ovRes.json() : null;
-          const dmJson = okDm ? await dmRes.json() : null;
-
+        if (ov.ok || dm.ok) {
+          const ovJson = ov.ok ? ov.json : null;
+          const dmJson = dm.ok ? dm.json : null;
           const daily =
-            dmJson?.daily || dmJson?.rows || dmJson?.items || dmJson?.data ||
-            (Array.isArray(dmJson) ? dmJson : []) || [];
-
+            (dmJson && (dmJson.daily || dmJson.rows || dmJson.items || dmJson.data || (Array.isArray(dmJson) ? dmJson : null))) || [];
           const merged = { ...(ovJson?.overview || ovJson || {}), daily };
-
           if (alive) { setMonthOverview(merged); setLoading(false); }
-          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ovStatus: ovRes.status, dmStatus: dmRes.status, json: { ov: okOv, dm: okDm } });
+          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ovStatus: ov.status, dmStatus: dm.status, json: { ov: ov.ok, dm: dm.ok } });
           return;
         } else {
-          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ov: { status: ovRes?.status, json: isJson(ovRes) }, dm: { status: dmRes?.status, json: isJson(dmRes) }, skipped: true });
+          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ov: { status: ov.status }, dm: { status: dm.status }, skipped: true });
         }
-      } catch (e) {
-        record({ source: 'admin-db', error: String(e) });
-      }
+      } catch (e) { record({ source: 'admin-db', error: String(e) }); }
 
       // 3) Static fallback
       try {
-        const r2 = await fetch(`/data/${month}.json`, { cache: 'no-store' });
-        if (r2.ok && isJson(r2)) {
-          const j2 = await r2.json();
-          if (alive) { setMonthOverview(j2?.overview || j2 || null); setLoading(false); }
+        const r2 = await tryJson(`/data/${month}.json`, 'static');
+        if (r2.ok) {
+          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); }
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
         } else {
-          record({ source: 'static (/public/data)', status: r2.status, json: isJson(r2), skipped: true });
+          record({ source: 'static (/public/data)', status: r2.status, json: r2.jsonCt, skipped: true });
         }
-      } catch (e) {
-        record({ source: 'static (/public/data)', error: String(e) });
-      }
+      } catch (e) { record({ source: 'static (/public/data)', error: String(e) }); }
 
       if (alive) { setMonthOverview(null); setLoading(false); }
-    }
+    })();
 
-    load();
     return () => { alive = false; };
-  }, [month]);
+  }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize), [rawForNormalize]);
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
-  const fallbackRoomTypeData = [
+  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
     { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
     { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
   ];
-  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : fallbackRoomTypeData;
-
   const roomTypeData = roomTypeRaw.map((rt) => {
     const available = num(rt.available, null);
     const sold      = num(rt.sold, null);
@@ -330,18 +387,17 @@ const Dashboard = ({ overview }) => {
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
-  const fallbackYearlyData = [
+  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
     { year: '2024', roomsSold: 759, occupancy: 45, revenue: 701738, rate: 925 },
     { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
   ];
-  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : fallbackYearlyData;
 
+  const breakevenRate = 1237;
   const revenueProgressPct   = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const occupancyTargetPct   = 62;
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
-  const breakevenRate = 1237;
 
   /* ------------------------------ UI bits ------------------------------ */
 
@@ -415,19 +471,19 @@ const Dashboard = ({ overview }) => {
         <div className="space-y-2 mb-4">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.targetToDate ? ov.revenueToDate / ov.targetToDate : 0))}% of target</span>
+            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${ov.revenueToDate >= ov.targetToDate ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${ov.targetToDate ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0}%` }} />
+            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.occupancyRate / 62))}% of target</span>
+            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${ov.occupancyRate >= 62 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${Math.round(100 * clamp01(ov.occupancyRate / 62))}%` }} />
+            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
           </div>
         </div>
       </div>
@@ -681,12 +737,43 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------ layout ------------------------------ */
+  /* ------------------------------ layout + optional inspector ------------------------------ */
 
-  const debugOn = (() => {
-    if (typeof window === 'undefined') return false;
-    try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
-  })();
+  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
+    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
+    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
+    { year: '2024', roomsSold: 759, occupancy: 45, revenue: 701738, rate: 925 },
+    { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
+  ];
+
+  const Inspector = () => {
+    if (!inspectOn) return null;
+    const dailySum = ov.dailyData.reduce((a, d) => a + num(d.revenue), 0);
+    const targetSum = ov.dailyData.reduce((a, d) => a + num(d.target), 0);
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
+          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle)</div>
+          {rawSlice && (
+            <>
+              <div><b>Raw slice ({rawSlice.tag}):</b></div>
+              <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
+            </>
+          )}
+          <div><b>Normalization summary:</b></div>
+          <pre className="overflow-auto">{JSON.stringify({
+            month,
+            dailyRows: ov.dailyData.length,
+            dailySumRevenue: dailySum,
+            dailySumTarget: targetSum,
+            revenueToDate: ov.revenueToDate,
+            targetToDate: ov.targetToDate,
+            occupancyRate: ov.occupancyRate,
+          }, null, 2)}</pre>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -719,11 +806,14 @@ const Dashboard = ({ overview }) => {
           </div>
 
           {loading && <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>}
-          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data found for {month}. Check admin APIs or add <code>/public/data/{month}.json</code>.</div>}
+          {!loading && !monthOverview && (
+            <div className="pb-3 text-sm text-red-600">
+              No data found for {month}. Check admin APIs or add <code>/public/data/{month}.json</code>.
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Optional debug banner */}
       {debugOn && sourceInfo && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
           <pre className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 overflow-auto">
@@ -731,6 +821,8 @@ const Dashboard = ({ overview }) => {
           </pre>
         </div>
       )}
+
+      <Inspector />
 
       {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
