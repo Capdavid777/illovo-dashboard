@@ -129,23 +129,39 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
 
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
+
   const revenueToDate   = num(get(['revenueToDate', 'revenue_to_date', 'revenue'], 0));
   const targetToDate    = num(get(['targetToDate', 'target_to_date', 'target'], 0));
-  const averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr'], 0));
-  let occupancyRate = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
+  const averageRoomRate = num(get(['averageRoomRate', 'avgRoomRate', 'arr', 'adr'], 0));
+  let occupancyRate     = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows'], []) || [];
+  // Flexible daily mapping for admin exports
+  const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows', 'days'], []) || [];
   const dailyData = dailyRaw.map((d, i) => {
-    const day = d.day ?? (d.date ? new Date(d.date).getUTCDate() : i + 1);
+    const g = (obj, ...keys) => {
+      for (const k of keys) {
+        if (obj[k] != null) return obj[k];
+        const hit = Object.keys(obj).find((kk) => kk.toLowerCase() === String(k).toLowerCase());
+        if (hit) return obj[hit];
+      }
+      return undefined;
+    };
+    const dd   = g(d, 'day') ?? (g(d, 'date') ? new Date(g(d, 'date')).getDate() : i + 1);
+    const rev  = num(g(d, 'revenue', 'actual', 'dailyRevenue', 'accommodationRevenue', 'totalRevenue'), 0);
+    const tgt  = num(g(d, 'target', 'targetRevenue', 'dailyTarget'), 0);
+    const rate = num(g(d, 'rate', 'arr', 'averageRate', 'adr'), 0);
+    const occ  = g(d, 'occupancy', 'occ', 'occupancyRate', 'occRate');
+    const metFlag = g(d, 'met', 'hitTarget', 'metTarget');
+
     return {
-      day,
-      date: d.date,
-      target: num(d.target ?? d.targetRevenue ?? d.target_revenue, 0),
-      revenue: num(d.revenue, 0),
-      occupancy: asPercent(d.occupancy ?? d.occ ?? d.occupancyRate ?? d.occRate, 0),
-      rate: num(d.rate ?? d.arr ?? d.averageRate, 0),
-      met: d.met ?? undefined,
+      day: dd,
+      date: g(d, 'date'),
+      target: tgt,
+      revenue: rev,
+      occupancy: asPercent(occ ?? 0, 0),
+      rate,
+      met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
     };
   });
 
@@ -156,8 +172,8 @@ function normalizeOverview(raw = {}) {
 
   const targetVariance = targetToDate - revenueToDate;
   const lastUpdated = get(['lastUpdated', 'updatedAt', 'last_updated'], null);
-  const roomTypes = get(['roomTypes', 'roomTypesData'], null);
-  const history   = get(['history', 'yearlyData'], null);
+  const roomTypes   = get(['roomTypes', 'roomTypesData'], null);
+  const history     = get(['history', 'yearlyData'], null);
 
   return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
 }
@@ -169,7 +185,7 @@ const ROOM_PALETTES = {
   '1 Bed':         { start: '#708090', end: '#5F6B7A' }, // Slate Gray
   'Deluxe Studio': { start: '#B38B6D', end: '#A17855' }, // Warm Taupe
   'Queen':         { start: '#D4AF37', end: '#C29D2C' }, // Soft Gold
-  'Queen Room':    { start: '#D4AF37', end: '#C29D2C' }, // alias
+  'Queen Room':    { start: '#D4AF37', end: '#C29D2C' },
 };
 const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
 const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
@@ -177,14 +193,14 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
-  // Month state + bounds + loading (client-only)
   const { month, setMonth } = useMonthParam();
   const [minKey, setMinKey] = useState();
   const [maxKey, setMaxKey] = useState();
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [selectedView, setSelectedView] = useState('overview');
 
-  // Bounds (optional)
+  // Optional bounds
   useEffect(() => {
     let alive = true;
     fetch('/data/index.json')
@@ -199,22 +215,66 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load this month’s file (safe if missing)
+  // ---------- MAIN LOADER: admin → db api → static ----------
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`/data/${month}.json`, { cache: 'no-store' })
-      .then(async (r) => (r.ok ? r.json() : null))
-      .then((j) => { if (alive) { setMonthOverview(j?.overview || j || null); setLoading(false); } })
-      .catch(() => { if (alive) { setMonthOverview(null); setLoading(false); } });
+
+    async function load() {
+      // 1) Try admin bucket via /api/month (if present)
+      try {
+        const r1 = await fetch(`/api/month?month=${month}`, { cache: 'no-store' });
+        if (r1.ok) {
+          const j1 = await r1.json();
+          if (alive) { setMonthOverview(j1?.overview || j1 || null); setLoading(false); }
+          return;
+        }
+      } catch {}
+
+      // 2) Try DB-backed endpoints from your admin portal
+      try {
+        const [ovRes, dmRes] = await Promise.all([
+          fetch(`/api/overview?month=${month}`,      { cache: 'no-store' }),
+          fetch(`/api/daily-metrics?month=${month}`, { cache: 'no-store' }),
+        ]);
+
+        const ovOk = ovRes?.ok; const dmOk = dmRes?.ok;
+        if (ovOk || dmOk) {
+          const ovJson = ovOk ? await ovRes.json() : null;
+          const dmJson = dmOk ? await dmRes.json() : null;
+
+          const daily =
+            dmJson?.daily || dmJson?.rows || dmJson?.items || dmJson?.data ||
+            (Array.isArray(dmJson) ? dmJson : []) || [];
+
+          const merged = {
+            ...(ovJson?.overview || ovJson || {}),
+            daily,
+          };
+
+          if (alive) { setMonthOverview(merged); setLoading(false); }
+          return;
+        }
+      } catch {}
+
+      // 3) Final fallback: static file in /public/data
+      try {
+        const r2 = await fetch(`/data/${month}.json`, { cache: 'no-store' });
+        const j2 = r2.ok ? await r2.json() : null;
+        if (alive) { setMonthOverview(j2?.overview || j2 || null); setLoading(false); }
+      } catch {
+        if (alive) { setMonthOverview(null); setLoading(false); }
+      }
+    }
+
+    load();
     return () => { alive = false; };
   }, [month]);
 
-  // Prefer loaded month data; fall back to prop
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize), [rawForNormalize]);
 
-  /* ------------------------------ derived data ------------------------------ */
+  /* ------------------------------ derived aggregates ------------------------------ */
 
   const fallbackRoomTypeData = [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
@@ -228,7 +288,7 @@ const Dashboard = ({ overview }) => {
     const available = num(rt.available, null);
     const sold      = num(rt.sold, null);
     const revenue   = num(rt.revenue, 0);
-    const rate      = num(rt.rate ?? rt.arr, 0);
+    const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
     const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
     const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
     return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
@@ -253,7 +313,7 @@ const Dashboard = ({ overview }) => {
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
   const breakevenRate = 1237;
 
-  /* ------------------------------ reusable bits ------------------------------ */
+  /* ------------------------------ UI bits ------------------------------ */
 
   const MetricCard = ({ title, value, subtitle, icon: Icon }) => (
     <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
@@ -328,15 +388,13 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ VIEWS ------------------------------ */
 
-  const [selectedView, setSelectedView] = useState('overview');
-
   const OverviewView = () => (
     <div className="space-y-8">
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
         <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
-        <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(1237)}`} icon={Home} />
+        <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
 
@@ -346,19 +404,19 @@ const Dashboard = ({ overview }) => {
         <div className="space-y-2 mb-4">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.targetToDate ? ov.revenueToDate / ov.targetToDate : 0))}% of target</span>
+            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${ov.revenueToDate >= ov.targetToDate ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${ov.targetToDate ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0}%` }} />
+        <div className="w-full bg-gray-200 rounded-full h-3">
+            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.occupancyRate / 62))}% of target</span>
+            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${ov.occupancyRate >= 62 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${Math.round(100 * clamp01(ov.occupancyRate / 62))}%` }} />
+            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
           </div>
         </div>
       </div>
@@ -410,7 +468,7 @@ const Dashboard = ({ overview }) => {
       const keyFn = keyMap[sortBy] || keyMap.revenue;
       const arr = [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
       return asc ? arr.reverse() : arr;
-    }, [sortBy, asc]);
+    }, [roomTypeData, sortBy, asc]);
 
     return (
       <div className="space-y-8">
@@ -658,7 +716,7 @@ const Dashboard = ({ overview }) => {
           </div>
 
           {loading && <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>}
-          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data file found for {month}. Add <code>/public/data/{month}.json</code>.</div>}
+          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data file found for {month}. Add <code>/public/data/{month}.json</code> or check your admin APIs.</div>}
         </div>
       </div>
 
