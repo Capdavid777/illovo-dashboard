@@ -1,4 +1,6 @@
 // components/Dashboard.js
+"use client";
+
 import React, { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
@@ -10,10 +12,6 @@ import {
   ArrowUpDown, SlidersHorizontal
 } from 'lucide-react';
 
-// ▼ NEW: Month controls + URL param hook
-import MonthSwitcher from './MonthSwitcher';            // create as shown earlier
-import { useMonthParam } from '../hooks/useMonthParam'; // create as shown earlier
-
 /* ------------------------------ helpers ------------------------------ */
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -21,13 +19,111 @@ const asPercent = (v, d = 0) => { const n = num(v, d); return !Number.isFinite(n
 const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
-
-// ↓ make Y-axis ticks a bit smaller so top labels fit
 const Y_TICK_SMALL = { fontSize: 11 };
 
-// Month utils (kept local so this file is self-contained)
+/* ------------------------------ month utils (inline, no imports) ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
 const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+const fromKey = (key) => {
+  const [y, m] = (key || '').split('-').map((x) => parseInt(x, 10));
+  return new Date(isFinite(y) ? y : new Date().getFullYear(), isFinite(m) ? m - 1 : new Date().getMonth(), 1);
+};
+const fmtMonth = (d) => d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+
+function useMonthParam() {
+  const current = () => toKey(new Date());
+  const [month, setMonthState] = useState(() => {
+    if (typeof window === 'undefined') return current();
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get('month') || current();
+    } catch { return current(); }
+  });
+
+  const setMonth = (next) => {
+    setMonthState(next);
+    if (typeof window !== 'undefined') {
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set('month', next);
+        window.history.replaceState({}, '', u.toString());
+      } catch {}
+    }
+  };
+
+  return { month, setMonth };
+}
+
+function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
+  const d = fromKey(monthKey);
+  const prev = () => {
+    const nd = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const nk = toKey(nd);
+    if (minKey && nk < minKey) return;
+    onChange(nk);
+  };
+  const next = () => {
+    const nd = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const nk = toKey(nd);
+    if (maxKey && nk > maxKey) return;
+    onChange(nk);
+  };
+
+  // Build options (newest first)
+  const options = (() => {
+    const out = [];
+    const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
+    const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
+    const cur = new Date(start);
+    while (cur <= end) {
+      out.push(toKey(cur));
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    return out.reverse();
+  })();
+
+  const canPrev = !minKey || monthKey > minKey;
+  const canNext = !maxKey || monthKey < maxKey;
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={prev}
+        disabled={!canPrev}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
+        aria-label="Previous month"
+        type="button"
+      >
+        ‹
+      </button>
+
+      <div className="flex items-center gap-2 rounded-2xl border border-gray-300 px-3 py-2">
+        <span className="font-medium whitespace-nowrap">{fmtMonth(d)}</span>
+      </div>
+
+      <button
+        onClick={next}
+        disabled={!canNext}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
+        aria-label="Next month"
+        type="button"
+      >
+        ›
+      </button>
+
+      <select
+        value={monthKey}
+        onChange={(e) => onChange(e.target.value)}
+        className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm"
+        aria-label="Jump to month"
+      >
+        {options.map((k) => (
+          <option key={k} value={k}>{fmtMonth(fromKey(k))}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 /* ------------------------------ data normalization ------------------------------ */
 
@@ -66,7 +162,7 @@ function normalizeOverview(raw = {}) {
   return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
 }
 
-/* ------------------------------ brand palettes (with gradients) ------------------------------ */
+/* ------------------------------ brand palettes ------------------------------ */
 
 const ROOM_PALETTES = {
   '2 Bed':         { start: '#0A2240', end: '#0F2E5E' }, // Deep Navy Blue
@@ -81,14 +177,14 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
-  // ▼ NEW: month state synced to URL (?month=YYYY-MM), plus bounds & loading
+  // Month state + bounds + loading (client-only)
   const { month, setMonth } = useMonthParam();
   const [minKey, setMinKey] = useState();
   const [maxKey, setMaxKey] = useState();
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Load available bounds from /public/data/index.json if present
+  // Bounds (optional)
   useEffect(() => {
     let alive = true;
     fetch('/data/index.json')
@@ -97,25 +193,19 @@ const Dashboard = ({ overview }) => {
         if (!alive || !j) return;
         if (j.min) setMinKey(j.min);
         if (j.max) setMaxKey(j.max);
-        // If month is outside provided max, snap to latest file available
         if (j.max && month > j.max) setMonth(j.max);
       })
       .catch(() => {});
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load the selected month’s JSON (shape compatible with your existing `overview`)
+  // Load this month’s file (safe if missing)
   useEffect(() => {
     let alive = true;
     setLoading(true);
     fetch(`/data/${month}.json`, { cache: 'no-store' })
       .then(async (r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (!alive) return;
-        // Accept either {overview: {...}} or raw overview payload
-        setMonthOverview(j?.overview || j || null);
-        setLoading(false);
-      })
+      .then((j) => { if (alive) { setMonthOverview(j?.overview || j || null); setLoading(false); } })
       .catch(() => { if (alive) { setMonthOverview(null); setLoading(false); } });
     return () => { alive = false; };
   }, [month]);
@@ -180,8 +270,6 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ---------- Custom Legend & Tooltip for Daily Revenue vs Target ---------- */
-
   const LegendSwatch = ({ type }) => (
     <span
       style={{
@@ -236,34 +324,16 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ VIEWS ------------------------------ */
 
+  const [selectedView, setSelectedView] = useState('overview');
+
   const OverviewView = () => (
     <div className="space-y-8">
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard
-          title="Revenue to Date"
-          value={currency(ov.revenueToDate)}
-          subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
-          icon={DollarSign}
-        />
-        <MetricCard
-          title="Occupancy Rate"
-          value={pct(ov.occupancyRate)}
-          subtitle={`vs ${pct(occupancyTargetPct)} target`}
-          icon={Users}
-        />
-        <MetricCard
-          title="Average Room Rate"
-          value={currency(ov.averageRoomRate)}
-          subtitle={`vs breakeven ${currency(breakevenRate)}`}
-          icon={Home}
-        />
-        <MetricCard
-          title="Target Variance"
-          value={currency(Math.abs(ov.targetVariance))}
-          subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
-          icon={Target}
-        />
+        <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
+        <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
+        <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(1237)}`} icon={Home} />
+        <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
 
       {/* Progress Bars */}
@@ -272,25 +342,19 @@ const Dashboard = ({ overview }) => {
         <div className="space-y-2 mb-4">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
+            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.targetToDate ? ov.revenueToDate / ov.targetToDate : 0))}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
-              style={{ width: `${revenueProgressPct}%` }}
-            />
+            <div className={`h-3 rounded-full ${ov.revenueToDate >= ov.targetToDate ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${ov.targetToDate ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0}%` }} />
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex justify-between">
             <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
+            <span className="text-sm text-gray-500">{Math.round(100 * clamp01(ov.occupancyRate / 62))}% of target</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`}
-              style={{ width: `${occupancyProgressPct}%` }}
-            />
+            <div className={`h-3 rounded-full ${ov.occupancyRate >= 62 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${Math.round(100 * clamp01(ov.occupancyRate / 62))}%` }} />
           </div>
         </div>
       </div>
@@ -326,7 +390,7 @@ const Dashboard = ({ overview }) => {
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
-    const [compact, setCompact] = useState(true); // default density = Compact
+    const [compact, setCompact] = useState(true);
 
     const sorted = useMemo(() => {
       const keyMap = {
@@ -338,11 +402,11 @@ const Dashboard = ({ overview }) => {
       const keyFn = keyMap[sortBy] || keyMap.revenue;
       const arr = [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
       return asc ? arr.reverse() : arr;
-    }, [roomTypeData, sortBy, asc]);
+    }, [sortBy, asc]);
 
     return (
       <div className="space-y-8">
-        {/* Summary Banner */}
+        {/* Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
           <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
@@ -467,26 +531,9 @@ const Dashboard = ({ overview }) => {
             </div>
           </div>
 
-          {/* Occupancy vs ADR (with helper explanation) */}
+          {/* Occupancy vs ADR */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
-
-            <details className="text-xs text-gray-600 mb-4 mt-2">
-              <summary className="cursor-pointer select-none text-gray-700">How to read this</summary>
-              <div className="mt-2 leading-relaxed">
-                <p className="mb-1">
-                  The chart compares each room type’s <span className="font-medium">Occupancy (%)</span> with its{' '}
-                  <span className="font-medium">Average Daily Rate (ADR)</span>.
-                </p>
-                <ul className="list-disc pl-5 space-y-1">
-                  <li><span className="font-medium">High ADR + low occupancy</span> → likely overpriced; consider discounting or promos.</li>
-                  <li><span className="font-medium">Low ADR + high occupancy</span> → underpriced; test a rate increase.</li>
-                  <li><span className="font-medium">Both high</span> → star performer; protect rate and allocate inventory.</li>
-                  <li><span className="font-medium">Both low</span> → weak product; repackage or reposition.</li>
-                </ul>
-              </div>
-            </details>
-
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
@@ -590,51 +637,31 @@ const Dashboard = ({ overview }) => {
               </div>
             </div>
 
-            {/* ▼ NEW: Month switcher + last updated */}
+            {/* Month switcher + last updated */}
             <div className="flex items-center space-x-4">
-              <MonthSwitcher
-                monthKey={month}
-                onChange={setMonth}
-                minKey={minKey}
-                maxKey={maxKey}
-              />
+              <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
                 <p className="text-sm font-medium">
-                  {ov.lastUpdated
-                    ? new Date(ov.lastUpdated).toLocaleDateString()
-                    : new Date().toLocaleDateString()}
+                  {ov.lastUpdated ? new Date(ov.lastUpdated).toLocaleDateString() : new Date().toLocaleDateString()}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Optional: a thin status line for data loading/errors */}
-          {loading && (
-            <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>
-          )}
-          {!loading && !monthOverview && (
-            <div className="pb-3 text-sm text-red-600">
-              No data file found for {month}. Add <code>/public/data/{month}.json</code> or adjust your loader.
-            </div>
-          )}
+          {loading && <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>}
+          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data file found for {month}. Add <code>/public/data/{month}.json</code>.</div>}
         </div>
       </div>
 
       {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex space-x-1">
-          {[
-            { id: 'overview', name: 'Overview', icon: Activity },
-            { id: 'rooms', name: 'Room Types', icon: Home },
-            { id: 'historical', name: 'Historical', icon: Calendar },
-          ].map((tab) => (
+          {[{ id: 'overview', name: 'Overview', icon: Activity }, { id: 'rooms', name: 'Room Types', icon: Home }, { id: 'historical', name: 'Historical', icon: Calendar }].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setSelectedView(tab.id)}
-              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
+              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'}`}
               type="button"
               aria-current={selectedView === tab.id ? 'page' : undefined}
             >
