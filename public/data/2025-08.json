@@ -1,1 +1,54 @@
-
+{
+  "overview": {
+    "revenueToDate": 884323.11,
+    "targetToDate": 1403168.56,
+    "averageRoomRate": 1006.34,
+    "occupancyRate": 0.483324,
+    "lastUpdated": "2025-08-31T00:00:00",
+    "daily": [
+      { "date": "2025-08-01", "day": 1, "target": 45263.501935, "revenue": 29304.13, "occupancy": 0.474576, "rate": 1046.576071 },
+      { "date": "2025-08-02", "day": 2, "target": 45263.501935, "revenue": 45045.12, "occupancy": 0.745763, "rate": 1023.752727 },
+      { "date": "2025-08-03", "day": 3, "target": 45263.501935, "revenue": 26598.95, "occupancy": 0.440678, "rate": 1023.036538 },
+      { "date": "2025-08-04", "day": 4, "target": 45263.501935, "revenue": 19846.73, "occupancy": 0.322034, "rate": 1044.564737 },
+      { "date": "2025-08-05", "day": 5, "target": 45263.501935, "revenue": 23433.69, "occupancy": 0.389831, "rate": 1018.856087 },
+      { "date": "2025-08-06", "day": 6, "target": 45263.501935, "revenue": 32046.03, "occupancy": 0.474576, "rate": 1014.793514 },
+      { "date": "2025-08-07", "day": 7, "target": 45263.501935, "revenue": 19654.82, "occupancy": 0.355932, "rate": 976.973333 },
+      { "date": "2025-08-08", "day": 8, "target": 45263.501935, "revenue": 22139.12, "occupancy": 0.389831, "rate": 962.513846 },
+      { "date": "2025-08-09", "day": 9, "target": 45263.501935, "revenue": 35032.61, "occupancy": 0.508475, "rate": 1026.373793 },
+      { "date": "2025-08-10", "day": 10, "target": 45263.501935, "revenue": 28579.05, "occupancy": 0.474576, "rate": 990.735556 },
+      { "date": "2025-08-11", "day": 11, "target": 45263.501935, "revenue": 24530.55, "occupancy": 0.423729, "rate": 1047.110714 },
+      { "date": "2025-08-12", "day": 12, "target": 45263.501935, "revenue": 26027.93, "occupancy": 0.406780, "rate": 1066.321667 },
+      { "date": "2025-08-13", "day": 13, "target": 45263.501935, "revenue": 28061.03, "occupancy": 0.423729, "rate": 1018.948571 },
+      { "date": "2025-08-14", "day": 14, "target": 45263.501935, "revenue": 29927.24, "occupancy": 0.457627, "rate": 1009.242308 },
+      { "date": "2025-08-15", "day": 15, "target": 45263.501935, "revenue": 27224.26, "occupancy": 0.491525, "rate": 899.169697 },
+      { "date": "2025-08-16", "day": 16, "target": 45263.501935, "revenue": 31613.45, "occupancy": 0.559322, "rate": 914.617105 },
+      { "date": "2025-08-17", "day": 17, "target": 45263.501935, "revenue": 24111.69, "occupancy": 0.423729, "rate": 1005.320833 },
+      { "date": "2025-08-18", "day": 18, "target": 45263.501935, "revenue": 22355.78, "occupancy": 0.423729, "rate": 940.909167 },
+      { "date": "2025-08-19", "day": 19, "target": 45263.501935, "revenue": 27177.7,  "occupancy": 0.491525, "rate": 875.390323 },
+      { "date": "2025-08-20", "day": 20, "target": 45263.501935, "revenue": 26641.74, "occupancy": 0.406780, "rate": 1029.297778 },
+      { "date": "2025-08-21", "day": 21, "target": 45263.501935, "revenue": 24898.31, "occupancy": 0.372881, "rate": 1081.639130 },
+      { "date": "2025-08-22", "day": 22, "target": 45263.501935, "revenue": 27769.32, "occupancy": 0.389831, "rate": 1057.132727 },
+      { "date": "2025-08-23", "day": 23, "target": 45263.501935, "revenue": 34821.67, "occupancy": 0.559322, "rate": 913.622105 },
+      { "date": "2025-08-24", "day": 24, "target": 45263.501935, "revenue": 29236.38, "occupancy": 0.525424, "rate": 889.557692 },
+      { "date": "2025-08-25", "day": 25, "target": 45263.501935, "revenue": 25993.94, "occupancy": 0.457627, "rate": 930.333929 },
+      { "date": "2025-08-26", "day": 26, "target": 45263.501935, "revenue": 29277.42, "occupancy": 0.508475, "rate": 902.375238 },
+      { "date": "2025-08-27", "day": 27, "target": 45263.501935, "revenue": 35435.75, "occupancy": 0.576271, "rate": 915.151923 },
+      { "date": "2025-08-28", "day": 28, "target": 45263.501935, "revenue": 35522.95, "occupancy": 0.576271, "rate": 916.672308 },
+      { "date": "2025-08-29", "day": 29, "target": 45263.501935, "revenue": 33952.82, "occupancy": 0.508475, "rate": 967.802353 },
+      { "date": "2025-08-30", "day": 30, "target": 45263.501935, "revenue": 34849.02, "occupancy": 0.508475, "rate": 994.137037 },
+      { "date": "2025-08-31", "day": 31, "target": 45263.501935, "revenue": 30424.75, "occupancy": 0.389831, "rate": 1038.509167 }
+    ],
+    "roomTypes": [
+      { "type": "Queen",         "available": 806, "sold": 331, "revenue": 290033.56, "rate": 876.23432,  "occupancy": 0.41017316017316016 },
+      { "type": "Deluxe Studio", "available": 310, "sold": 148, "revenue": 121412.46, "rate": 820.354459, "occupancy": 0.4774193548387097 },
+      { "type": "1 Bed",         "available": 496, "sold": 272, "revenue": 295196.16, "rate": 1085.28,    "occupancy": 0.5483870967741935 },
+      { "type": "2 Bed",         "available": 217, "sold": 134, "revenue": 177729.84, "rate": 1326.34209, "occupancy": 0.617051429717682 }
+    ],
+    "history": [
+      { "year": "2022", "roomsSold": 474, "occupancy": 0.2627,  "revenue": 573668.35,  "rate": 1210.27 },
+      { "year": "2023", "roomsSold": 1115,"occupancy": 0.6106,  "revenue": 1881374.17, "rate": 1687.33 },
+      { "year": "2024", "roomsSold": 759, "occupancy": 0.4452,  "revenue": 701737.82,  "rate": 924.56 },
+      { "year": "2025", "roomsSold": 885, "occupancy": 0.483871,"revenue": 883432.90,  "rate": 1005.222454 }
+    ]
+  }
+}
