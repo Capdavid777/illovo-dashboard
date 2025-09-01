@@ -21,7 +21,12 @@ const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 
-/* ------------------------------ month utils (inline, no imports) ------------------------------ */
+const isJson = (res) => {
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  return ct.includes('application/json');
+};
+
+/* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
 const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 const fromKey = (key) => {
@@ -50,7 +55,6 @@ function useMonthParam() {
       } catch {}
     }
   };
-
   return { month, setMonth };
 }
 
@@ -69,16 +73,12 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     onChange(nk);
   };
 
-  // Build options (newest first)
   const options = (() => {
     const out = [];
     const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
     const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
     const cur = new Date(start);
-    while (cur <= end) {
-      out.push(toKey(cur));
-      cur.setMonth(cur.getMonth() + 1);
-    }
+    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
     return out.reverse();
   })();
 
@@ -87,45 +87,27 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
 
   return (
     <div className="flex items-center gap-2">
-      <button
-        onClick={prev}
-        disabled={!canPrev}
+      <button onClick={prev} disabled={!canPrev}
         className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
-        aria-label="Previous month"
-        type="button"
-      >
-        ‹
-      </button>
+        aria-label="Previous month" type="button">‹</button>
 
       <div className="flex items-center gap-2 rounded-2xl border border-gray-300 px-3 py-2">
         <span className="font-medium whitespace-nowrap">{fmtMonth(d)}</span>
       </div>
 
-      <button
-        onClick={next}
-        disabled={!canNext}
+      <button onClick={next} disabled={!canNext}
         className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10"
-        aria-label="Next month"
-        type="button"
-      >
-        ›
-      </button>
+        aria-label="Next month" type="button">›</button>
 
-      <select
-        value={monthKey}
-        onChange={(e) => onChange(e.target.value)}
-        className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm"
-        aria-label="Jump to month"
-      >
-        {options.map((k) => (
-          <option key={k} value={k}>{fmtMonth(fromKey(k))}</option>
-        ))}
+      <select value={monthKey} onChange={(e) => onChange(e.target.value)}
+        className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm" aria-label="Jump to month">
+        {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
       </select>
     </div>
   );
 }
 
-/* ------------------------------ data normalization ------------------------------ */
+/* ------------------------------ normalization ------------------------------ */
 
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
@@ -136,8 +118,7 @@ function normalizeOverview(raw = {}) {
   let occupancyRate     = get(['occupancyRate', 'occupancy_to_date', 'occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  // Flexible daily mapping for admin exports
-  const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows', 'days'], []) || [];
+  const dailyRaw = get(['dailySeries', 'daily', 'items', 'rows', 'days', 'data'], []) || [];
   const dailyData = dailyRaw.map((d, i) => {
     const g = (obj, ...keys) => {
       for (const k of keys) {
@@ -178,13 +159,13 @@ function normalizeOverview(raw = {}) {
   return { revenueToDate, targetToDate, averageRoomRate, occupancyRate, targetVariance, dailyData, lastUpdated, roomTypes, history };
 }
 
-/* ------------------------------ brand palettes ------------------------------ */
+/* ------------------------------ palettes ------------------------------ */
 
 const ROOM_PALETTES = {
-  '2 Bed':         { start: '#0A2240', end: '#0F2E5E' }, // Deep Navy Blue
-  '1 Bed':         { start: '#708090', end: '#5F6B7A' }, // Slate Gray
-  'Deluxe Studio': { start: '#B38B6D', end: '#A17855' }, // Warm Taupe
-  'Queen':         { start: '#D4AF37', end: '#C29D2C' }, // Soft Gold
+  '2 Bed':         { start: '#0A2240', end: '#0F2E5E' },
+  '1 Bed':         { start: '#708090', end: '#5F6B7A' },
+  'Deluxe Studio': { start: '#B38B6D', end: '#A17855' },
+  'Queen':         { start: '#D4AF37', end: '#C29D2C' },
   'Queen Room':    { start: '#D4AF37', end: '#C29D2C' },
 };
 const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
@@ -199,6 +180,7 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
+  const [sourceInfo, setSourceInfo] = useState(null); // <— debug: which source & why
 
   // Optional bounds
   useEffect(() => {
@@ -215,56 +197,84 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------- MAIN LOADER: admin → db api → static ----------
+  // ---------- MAIN LOADER: admin-bucket → DB APIs → static ----------
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setSourceInfo(null);
+
+    const record = (info) => {
+      console.info('[Dashboard loader]', info);
+      if (alive) setSourceInfo(info);
+    };
 
     async function load() {
-      // 1) Try admin bucket via /api/month (if present)
+      // 1) Admin bucket via /api/month (if you added it)
       try {
-        const r1 = await fetch(`/api/month?month=${month}`, { cache: 'no-store' });
-        if (r1.ok) {
+        const r1 = await fetch(`/api/month?month=${month}`, {
+          cache: 'no-store',
+          credentials: 'include',
+          redirect: 'follow',
+        });
+        if (r1.ok && isJson(r1)) {
           const j1 = await r1.json();
           if (alive) { setMonthOverview(j1?.overview || j1 || null); setLoading(false); }
+          record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
+        } else {
+          record({ source: 'admin-bucket (/api/month)', status: r1.status, json: isJson(r1), skipped: true });
         }
-      } catch {}
+      } catch (e) {
+        record({ source: 'admin-bucket (/api/month)', error: String(e) });
+      }
 
-      // 2) Try DB-backed endpoints from your admin portal
+      // 2) DB-backed endpoints (admin portal)
       try {
         const [ovRes, dmRes] = await Promise.all([
-          fetch(`/api/overview?month=${month}`,      { cache: 'no-store' }),
-          fetch(`/api/daily-metrics?month=${month}`, { cache: 'no-store' }),
+          fetch(`/api/overview?month=${month}`,      { cache: 'no-store', credentials: 'include', redirect: 'follow' }),
+          fetch(`/api/daily-metrics?month=${month}`, { cache: 'no-store', credentials: 'include', redirect: 'follow' }),
         ]);
 
-        const ovOk = ovRes?.ok; const dmOk = dmRes?.ok;
-        if (ovOk || dmOk) {
-          const ovJson = ovOk ? await ovRes.json() : null;
-          const dmJson = dmOk ? await dmRes.json() : null;
+        const okOv = ovRes?.ok && isJson(ovRes);
+        const okDm = dmRes?.ok && isJson(dmRes);
+
+        if (okOv || okDm) {
+          const ovJson = okOv ? await ovRes.json() : null;
+          const dmJson = okDm ? await dmRes.json() : null;
 
           const daily =
             dmJson?.daily || dmJson?.rows || dmJson?.items || dmJson?.data ||
             (Array.isArray(dmJson) ? dmJson : []) || [];
 
-          const merged = {
-            ...(ovJson?.overview || ovJson || {}),
-            daily,
-          };
+          const merged = { ...(ovJson?.overview || ovJson || {}), daily };
 
           if (alive) { setMonthOverview(merged); setLoading(false); }
+          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ovStatus: ovRes.status, dmStatus: dmRes.status, json: { ov: okOv, dm: okDm } });
           return;
+        } else {
+          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ov: { status: ovRes?.status, json: isJson(ovRes) }, dm: { status: dmRes?.status, json: isJson(dmRes) }, skipped: true });
         }
-      } catch {}
+      } catch (e) {
+        record({ source: 'admin-db', error: String(e) });
+      }
 
-      // 3) Final fallback: static file in /public/data
+      // 3) Static fallback
       try {
         const r2 = await fetch(`/data/${month}.json`, { cache: 'no-store' });
-        const j2 = r2.ok ? await r2.json() : null;
-        if (alive) { setMonthOverview(j2?.overview || j2 || null); setLoading(false); }
-      } catch {
-        if (alive) { setMonthOverview(null); setLoading(false); }
+        if (r2.ok && isJson(r2)) {
+          const j2 = await r2.json();
+          if (alive) { setMonthOverview(j2?.overview || j2 || null); setLoading(false); }
+          record({ source: 'static (/public/data)', status: r2.status, json: true });
+          return;
+        } else {
+          record({ source: 'static (/public/data)', status: r2.status, json: isJson(r2), skipped: true });
+        }
+      } catch (e) {
+        record({ source: 'static (/public/data)', error: String(e) });
       }
+
+      // If everything failed
+      if (alive) { setMonthOverview(null); setLoading(false); }
     }
 
     load();
@@ -331,34 +341,21 @@ const Dashboard = ({ overview }) => {
   );
 
   const LegendSwatch = ({ type }) => (
-    <span
-      style={{
-        width: 12, height: 12, display: 'inline-block', borderRadius: 2,
-        background: type === 'revenue'
-          ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)'
-          : '#000000',
-        border: '1px solid rgba(0,0,0,0.25)',
-      }}
-    />
+    <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2,
+      background: type === 'revenue' ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)' : '#000000',
+      border: '1px solid rgba(0,0,0,0.25)' }} />
   );
 
   const renderLegend = () => (
     <div className="flex items-center justify-center gap-6 mt-2 text-sm">
-      <div className="flex items-center gap-2">
-        <LegendSwatch type="target" />
-        <span>Daily Target</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <LegendSwatch type="revenue" />
-        <span>Actual Revenue</span>
-      </div>
+      <div className="flex items-center gap-2"><LegendSwatch type="target" /><span>Daily Target</span></div>
+      <div className="flex items-center gap-2"><LegendSwatch type="revenue" /><span>Actual Revenue</span></div>
     </div>
   );
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
-    // tolerant check (±1% or R100) + explicit flag support
     const rev = num(pData.revenue);
     const tgt = num(pData.target);
     const epsilon = Math.max(100, tgt * 0.01);
@@ -369,24 +366,18 @@ const Dashboard = ({ overview }) => {
       <div className="rounded-md bg-white shadow border p-3 text-sm">
         <div className="font-medium mb-1">Day {label}</div>
         <div className="flex items-center justify-between gap-6">
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" />
-            <span>Daily Target</span>
-          </div>
+          <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" /><span>Daily Target</span></div>
           <span className="font-medium">{currency(pData.target)}</span>
         </div>
         <div className="flex items-center justify-between gap-6 mt-1">
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} />
-            <span>Actual Revenue</span>
-          </div>
+          <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} /><span>Actual Revenue</span></div>
           <span className="font-medium" style={{ color: revColor }}>{currency(pData.revenue)}</span>
         </div>
       </div>
     );
   };
 
-  /* ------------------------------ VIEWS ------------------------------ */
+  /* ------------------------------ views ------------------------------ */
 
   const OverviewView = () => (
     <div className="space-y-8">
@@ -406,7 +397,7 @@ const Dashboard = ({ overview }) => {
             <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
             <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
           </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
+          <div className="w-full bg-gray-200 rounded-full h-3">
             <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
           </div>
         </div>
@@ -535,13 +526,9 @@ const Dashboard = ({ overview }) => {
                   <div className="col-span-2" title="Occupancy (sold ÷ available)">
                     <p className="text-gray-500 mb-1">Occupancy</p>
                     <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full"
-                        style={{
-                          width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
-                          background: `linear-gradient(90deg, ${pal.start}, ${pal.end})`,
-                        }}
-                      />
+                      <div className="h-2 rounded-full"
+                        style={{ width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
+                                 background: `linear-gradient(90deg, ${pal.start}, ${pal.end})` }} />
                     </div>
                     <p className="mt-1 text-xs text-gray-600">{pct(room.occupancy)}</p>
                   </div>
@@ -553,7 +540,6 @@ const Dashboard = ({ overview }) => {
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Revenue by Room Type (Pie) */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold mb-2">Revenue by Room Type</h3>
             <div className="h-80">
@@ -571,25 +557,14 @@ const Dashboard = ({ overview }) => {
                       );
                     })}
                   </defs>
-                  <Pie
-                    data={roomTypeData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ payload, percent, x, y, textAnchor }) => {
-                      const pal = getPalette(payload.type);
-                      return (
-                        <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
-                          {payload.type} {(percent * 100).toFixed(0)}%
-                        </text>
-                      );
-                    }}
-                    outerRadius={80}
-                    dataKey="revenue"
-                  >
-                    {roomTypeData.map((r, idx) => (
-                      <Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />
-                    ))}
+                  <Pie data={roomTypeData} cx="50%" cy="50%" labelLine={false}
+                       label={({ payload, percent, x, y, textAnchor }) => {
+                         const pal = getPalette(payload.type);
+                         return <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
+                           {payload.type} {(percent * 100).toFixed(0)}%
+                         </text>;
+                       }} outerRadius={80} dataKey="revenue">
+                    {roomTypeData.map((r, idx) => (<Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />))}
                   </Pie>
                   <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
                 </PieChart>
@@ -597,7 +572,6 @@ const Dashboard = ({ overview }) => {
             </div>
           </div>
 
-          {/* Occupancy vs ADR */}
           <div className="bg-white p-6 rounded-lg shadow-lg">
             <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
             <div className="h-80">
@@ -689,6 +663,11 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ layout ------------------------------ */
 
+  const debugOn = (() => {
+    if (typeof window === 'undefined') return false;
+    try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
+  })();
+
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
@@ -703,7 +682,6 @@ const Dashboard = ({ overview }) => {
               </div>
             </div>
 
-            {/* Month switcher + last updated */}
             <div className="flex items-center space-x-4">
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
@@ -711,28 +689,38 @@ const Dashboard = ({ overview }) => {
                 <p className="text-sm font-medium">
                   {ov.lastUpdated ? new Date(ov.lastUpdated).toLocaleDateString() : new Date().toLocaleDateString()}
                 </p>
+                {/* tiny source chip */}
+                {sourceInfo && (
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
           {loading && <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>}
-          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data file found for {month}. Add <code>/public/data/{month}.json</code> or check your admin APIs.</div>}
+          {!loading && !monthOverview && <div className="pb-3 text-sm text-red-600">No data found for {month}. Check admin APIs or add <code>/public/data/{month}.json</code>.</div>}
         </div>
       </div>
+
+      {/* Optional debug banner */}
+      {debugOn && sourceInfo && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <pre className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 overflow-auto">
+            {JSON.stringify(sourceInfo, null, 2)}
+          </pre>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex space-x-1">
           {[{ id: 'overview', name: 'Overview', icon: Activity }, { id: 'rooms', name: 'Room Types', icon: Home }, { id: 'historical', name: 'Historical', icon: Calendar }].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setSelectedView(tab.id)}
+            <button key={tab.id} onClick={() => setSelectedView(tab.id)}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-              type="button"
-              aria-current={selectedView === tab.id ? 'page' : undefined}
-            >
-              <tab.icon className="w-4 h-4 mr-2" />
-              {tab.name}
+              type="button" aria-current={selectedView === tab.id ? 'page' : undefined}>
+              <tab.icon className="w-4 h-4 mr-2" />{tab.name}
             </button>
           ))}
         </div>
