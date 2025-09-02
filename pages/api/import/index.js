@@ -1,19 +1,19 @@
-<<<<<<< HEAD
+ HEAD
 // pages/api/admin/import/index.js
-=======
+
 // pages/api/import/index.js
 import { PrismaClient } from '@prisma/client';
 import formidable from 'formidable';
->>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
 import * as XLSX from 'xlsx';
 import { getSession } from '@auth0/nextjs-auth0';
 import prisma from '../../../lib/prisma'; // adjust if your prisma import path differs
 
-<<<<<<< HEAD
+ HEAD
 const toNum = (v, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
-=======
+
 export const config = {
   api: { bodyParser: false },
   runtime: 'nodejs',
@@ -29,12 +29,12 @@ const toNum = (v) => {
   if (v == null || v === '') return null;
   const n = Number(String(v).replace(/[, ]/g, ''));
   return Number.isFinite(n) ? n : null;
->>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
 };
 
 // Normalize occupancy to a percent number (0..100)
 const toPercent = (v) => {
-<<<<<<< HEAD
+ HEAD
   const n = toNum(v, 0);
   if (!Number.isFinite(n)) return 0;
   // accept either 0..1 fraction or 0..100 percentage
@@ -54,7 +54,7 @@ const getKey = (row, keys) => {
 
 export const config = {
   api: { bodyParser: false }, // we’re reading multipart via formidable/next-connect in your current impl
-=======
+
   const n = toNum(v);
   if (n == null) return null;
   return n <= 1.5 ? Math.round(n * 100 * 10) / 10 : Math.round(n * 10) / 10;
@@ -107,7 +107,7 @@ const findRoomTypesSheetName = (wb) => {
     if (n.includes('room') && n.includes('type')) return name;
   }
   return null;
->>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
 };
 
 // find likely Historical sheet
@@ -123,7 +123,7 @@ const findHistoricalSheetName = (wb) => {
 /* ------------------------------ handler ------------------------------ */
 
 export default async function handler(req, res) {
-<<<<<<< HEAD
+ HEAD
   // --- Auth guard (keep whatever you have)
   const session = await getSession(req, res);
   if (!session?.user) {
@@ -141,7 +141,7 @@ export default async function handler(req, res) {
     const file = files?.file; // adapt if your field name differs
 
     const wb = XLSX.readFile(file.filepath || file.path);
-=======
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
@@ -160,12 +160,12 @@ export default async function handler(req, res) {
     const uploaded = Array.isArray(files.file) ? files.file[0] : files.file;
     const filePath = uploaded?.filepath || uploaded?.path;
     if (!filePath) return res.status(400).json({ ok: false, error: 'MISSING_FILE' });
->>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
 
     /* ------------------ existing Daily + RoomTypes import ------------------ */
     // Keep your current logic here unchanged…
 
-<<<<<<< HEAD
+ HEAD
     /* ------------------ NEW: Historical (Yearly) sheet ------------------ */
     const histSheet =
       wb.Sheets['Historical'] ||
@@ -198,7 +198,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ ok: false, error: 'IMPORT_FAIL' });
-=======
+
     /* ---------- DAILY (first sheet) ---------- */
     const dailySheetName = wb.SheetNames[0];
     const dailyWS = wb.Sheets[dailySheetName];
@@ -335,7 +335,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('IMPORT ERROR:', err);
     return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
->>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
   }
 }
 
