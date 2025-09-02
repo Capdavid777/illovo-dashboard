@@ -1,6 +1,6 @@
 // pages/room-types/index.js
 import useSWR from 'swr';
-import useMonthKey, { useMonthKey as useMonthKeyNamed } from '../../lib/useMonthKey';
+import { useMonthKey } from '../../lib/useMonthKey';
 
 const fetcher = (url) => fetch(url, { cache: 'no-store' }).then((r) => r.json());
 
