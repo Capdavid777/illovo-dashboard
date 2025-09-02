@@ -194,3 +194,13 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'month endpoint failed', detail: String(e) });
   }
 }
+
+// After you build `payload` in each path:
+payload.__source = 'import-month (strict)';      // in the import-month branch
+// or:
+payload.__source = 'admin-db (merged, strict)';  // in the DB-merge branch
+// or:
+payload.__source = 'static (/public/data)';      // in the static branch
+
+// Before each `return res.status(200).json(payload)`
+
