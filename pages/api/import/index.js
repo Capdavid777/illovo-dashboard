@@ -1,8 +1,19 @@
+<<<<<<< HEAD
+// pages/api/admin/import/index.js
+=======
 // pages/api/import/index.js
 import { PrismaClient } from '@prisma/client';
 import formidable from 'formidable';
+>>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
 import * as XLSX from 'xlsx';
+import { getSession } from '@auth0/nextjs-auth0';
+import prisma from '../../../lib/prisma'; // adjust if your prisma import path differs
 
+<<<<<<< HEAD
+const toNum = (v, d = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+=======
 export const config = {
   api: { bodyParser: false },
   runtime: 'nodejs',
@@ -18,10 +29,32 @@ const toNum = (v) => {
   if (v == null || v === '') return null;
   const n = Number(String(v).replace(/[, ]/g, ''));
   return Number.isFinite(n) ? n : null;
+>>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
 };
 
 // Normalize occupancy to a percent number (0..100)
 const toPercent = (v) => {
+<<<<<<< HEAD
+  const n = toNum(v, 0);
+  if (!Number.isFinite(n)) return 0;
+  // accept either 0..1 fraction or 0..100 percentage
+  return n <= 1.5 ? n * 100 : n;
+};
+
+// Flexible getter: try multiple header spellings (case-insensitive)
+const getKey = (row, keys) => {
+  const map = {};
+  Object.keys(row || {}).forEach((k) => (map[k.toLowerCase()] = k));
+  for (const want of keys) {
+    const hit = map[want.toLowerCase()];
+    if (hit) return row[hit];
+  }
+  return undefined;
+};
+
+export const config = {
+  api: { bodyParser: false }, // we’re reading multipart via formidable/next-connect in your current impl
+=======
   const n = toNum(v);
   if (n == null) return null;
   return n <= 1.5 ? Math.round(n * 100 * 10) / 10 : Math.round(n * 10) / 10;
@@ -74,6 +107,7 @@ const findRoomTypesSheetName = (wb) => {
     if (n.includes('room') && n.includes('type')) return name;
   }
   return null;
+>>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
 };
 
 // find likely Historical sheet
@@ -89,6 +123,25 @@ const findHistoricalSheetName = (wb) => {
 /* ------------------------------ handler ------------------------------ */
 
 export default async function handler(req, res) {
+<<<<<<< HEAD
+  // --- Auth guard (keep whatever you have)
+  const session = await getSession(req, res);
+  if (!session?.user) {
+    return res.status(401).json({ ok: false, error: 'UNAUTH' });
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'METHOD' });
+  }
+
+  try {
+    // however you’re parsing the uploaded file today — keep that
+    // Below is a common pattern with `formidable` already in many setups.
+    const { fields, files } = await parseMultipart(req); // <<< use your existing helper
+    const file = files?.file; // adapt if your field name differs
+
+    const wb = XLSX.readFile(file.filepath || file.path);
+=======
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
@@ -107,9 +160,45 @@ export default async function handler(req, res) {
     const uploaded = Array.isArray(files.file) ? files.file[0] : files.file;
     const filePath = uploaded?.filepath || uploaded?.path;
     if (!filePath) return res.status(400).json({ ok: false, error: 'MISSING_FILE' });
+>>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
 
-    const wb = XLSX.readFile(filePath);
+    /* ------------------ existing Daily + RoomTypes import ------------------ */
+    // Keep your current logic here unchanged…
 
+<<<<<<< HEAD
+    /* ------------------ NEW: Historical (Yearly) sheet ------------------ */
+    const histSheet =
+      wb.Sheets['Historical'] ||
+      wb.Sheets['History'] ||
+      wb.Sheets['historical'] ||
+      wb.Sheets['HISTORICAL'];
+
+    if (histSheet) {
+      const rows = XLSX.utils.sheet_to_json(histSheet, { defval: null });
+
+      // upsert all yearly rows
+      for (const r of rows) {
+        const year      = toNum(getKey(r, ['year']));
+        if (!year) continue; // need a year
+
+        const roomsSold = toNum(getKey(r, ['roomsSold', 'rooms_sold', 'sold']));
+        const occupancy = toPercent(getKey(r, ['occupancy', 'occ', 'occ%']));
+        const revenue   = toNum(getKey(r, ['revenue', 'rev']));
+        const rate      = toNum(getKey(r, ['rate', 'adr', 'avg rate', 'avg_rate']));
+
+        await prisma.yearMetric.upsert({
+          where: { year },
+          update: { roomsSold, occupancy, revenue, rate },
+          create: { year, roomsSold, occupancy, revenue, rate },
+        });
+      }
+    }
+
+    return res.json({ ok: true, message: 'Import completed (including Historical, if present).' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: 'IMPORT_FAIL' });
+=======
     /* ---------- DAILY (first sheet) ---------- */
     const dailySheetName = wb.SheetNames[0];
     const dailyWS = wb.Sheets[dailySheetName];
@@ -246,5 +335,16 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('IMPORT ERROR:', err);
     return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
+>>>>>>> bb86a5dca9293db80ba022033ce1c20ee3098ecb
   }
+}
+
+/* ---------------- helpers you likely already have ---------------- */
+// If you already have a multipart parser, keep using it and delete this.
+import formidable from 'formidable';
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const form = formidable({ multiples: false, keepExtensions: true });
+    form.parse(req, (err, fields, files) => (err ? reject(err) : resolve({ fields, files })));
+  });
 }

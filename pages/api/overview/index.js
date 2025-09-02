@@ -1,4 +1,7 @@
 // pages/api/overview/index.js
+ HEAD
+import prisma from '../../../lib/prisma';
+
 import { PrismaClient } from '@prisma/client';
 
 export const config = { runtime: 'nodejs' };
@@ -23,10 +26,18 @@ function monthRangeUTC(key /* 'YYYY-MM' | undefined */) {
   return { start, end };
 }
 
+ feat/api-updates
+const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+const endOfToday   = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+const normalizePct = (n) => (!Number.isFinite(n) ? 0 : (n <= 1.5 ? n * 100 : n));
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
+
 const toNum0 = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
+ main
 
 const pct = (v) => {
   const n = Number(v);
@@ -37,6 +48,15 @@ const pct = (v) => {
 
 // ---------- handler ----------
 export default async function handler(req, res) {
+ feat/api-updates
+  try {
+ HEAD
+    // ----- your existing queries -----
+    const daily = await prisma.dailyMetric.findMany({
+
+    const from = startOfMonth();
+    const to   = endOfToday();
+
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
@@ -50,9 +70,68 @@ export default async function handler(req, res) {
   try {
     const { month } = req.query;
     const { start, end } = monthRangeUTC(month);
+ main
 
     // ---- daily series for month ----
     const rows = await prisma.dailyMetric.findMany({
+ feat/api-updates
+      where: { date: { gte: from, lte: to } },
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
+      orderBy: { date: 'asc' },
+    });
+
+    const roomTypes = await prisma.roomTypeMetric.findMany({
+      orderBy: { type: 'asc' },
+    });
+
+ HEAD
+    // ----- NEW: historical (yearly) metrics -----
+    const yrs = await prisma.yearMetric.findMany({
+      orderBy: { year: 'asc' },
+
+    const averageRoomRate = arrCount ? Math.round(arrSum / arrCount) : 0;
+    const occupancyRate   = occCount ? Math.round((occSum / occCount) * 10) / 10 : 0;
+    const targetVariance  = targetSum - revenueSum;
+    const latest          = rows[rows.length - 1];
+    const lastUpdated     = latest ? (latest.updatedAt || latest.createdAt || latest.date).toISOString() : null;
+
+    /* ----- Room Types (aggregate month-to-date) ----- */
+    const rts = await prisma.roomTypeMetric.findMany({
+      where: { date: { gte: from, lte: to } },
+      select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
+    });
+
+    const history = yrs.map((y) => ({
+      year: String(y.year),
+      roomsSold: y.roomsSold,
+      occupancy: y.occupancy, // already 0..100 in DB
+      revenue: y.revenue,
+      rate: y.rate,
+    }));
+
+    // shape your daily + roomTypes as before
+    const dailySeries = daily.map((d) => ({
+      id: d.id,
+      day: new Date(d.date).getUTCDate(),
+      date: d.date.toISOString(),
+      revenue: d.revenue,
+      target: d.target,
+      occupancy: d.occupancy,      // whatever you store
+      rate: d.rate,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    }));
+
+    const roomTypesData = roomTypes.map((r) => ({
+      type: r.type,
+      available: r.available,
+      sold: r.sold,
+      revenue: r.revenue,
+      rate: r.rate,
+      occupancy: r.occupancy,      // 0..100 expected by Dashboard
+    }));
+
       where: { date: { gte: start, lt: end } },
       orderBy: { date: 'asc' },
       select: {
@@ -150,6 +229,24 @@ export default async function handler(req, res) {
       }
       byType.set(key, acc);
     }
+ main
+
+    // ----- totals/topline as you do today -----
+    const revenueToDate   = daily.reduce((a, b) => a + (b.revenue || 0), 0);
+    const targetToDate    = daily.reduce((a, b) => a + (b.target  || 0), 0);
+    const averageRoomRate = Math.round(
+      daily.reduce((a, b) => a + (b.rate || 0), 0) / (daily.length || 1)
+    );
+    const occupancyRate = Math.round(
+      daily.reduce((a, b) => a + (b.occupancy || 0), 0) / (daily.length || 1)
+    );
+    const targetVariance = targetToDate - revenueToDate;
+
+ HEAD
+    return res.json({
+      ok: true,
+      revenueToDate,
+      targetToDate,
 
     const roomTypes = Array.from(byType.values()).map((t) => {
       const rateFromAvg = t.rateCount ? t.rateSum / t.rateCount : 0;
@@ -192,13 +289,23 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
+ feat/api-updates
+      revenueToDate: revenueSum,
+      targetToDate: targetSum,
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
+
       revenueToDate: revSum,
       targetToDate: tgtSum,
+ main
       averageRoomRate,
       occupancyRate,
       targetVariance,
-      lastUpdated,
+      lastUpdated: new Date().toISOString(),
       dailySeries,
+ HEAD
+      roomTypes: roomTypesData,
+      history, // <<< the Dashboard picks this up
+
       roomTypes,
       history,
       totals: {
@@ -208,9 +315,15 @@ export default async function handler(req, res) {
         occupancyRate,
         targetVariance,
       },
+ bb86a5dca9293db80ba022033ce1c20ee3098ecb
     });
+ feat/api-updates
+  } catch (e) {
+    console.error(e);
+
   } catch (err) {
     console.error('GET /api/overview error:', err);
+ main
     return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
   }
 }
