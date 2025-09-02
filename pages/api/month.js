@@ -1,18 +1,34 @@
 // pages/api/month.js
-// 1) Prefer spreadsheet (/api/import-month), 2) merge DB endpoints, 3) static fallback
-// Completes missing month days using the most common daily target.
+// Unified month endpoint with source priority:
+// 1) /api/import-month (spreadsheet upload)  ✅ preferred
+// 2) /api/overview + /api/daily-metrics (DB merge)
+// 3) /public/data/<month>.json              (static fallback)
+//
+// It also completes ONLY truly missing calendar days using the
+// most-common daily target, and de-duplicates so there is exactly
+// one row per day in the selected month.
 
 export const config = { api: { bodyParser: false }, runtime: 'nodejs' };
 
-const NO_STORE = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
-const isJson = (r) => (r.headers.get('content-type') || '').toLowerCase().includes('application/json');
+const NO_STORE =
+  'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
+
+const isJson = (r) =>
+  (r.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
 const fromKey = (key) => {
   const [y, m] = (key || '').split('-').map((x) => parseInt(x, 10));
-  return new Date(Number.isFinite(y) ? y : new Date().getFullYear(), Number.isFinite(m) ? m - 1 : new Date().getMonth(), 1);
+  return new Date(
+    Number.isFinite(y) ? y : new Date().getFullYear(),
+    Number.isFinite(m) ? m - 1 : new Date().getMonth(),
+    1
+  );
 };
 const pad2 = (n) => String(n).padStart(2, '0');
-const dim = (key) => { const d = fromKey(key); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
+const dim = (key) => {
+  const d = fromKey(key);
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+};
 const num = (v, d = 0) => {
   if (v == null) return d;
   if (typeof v === 'number') return Number.isFinite(v) ? v : d;
@@ -25,13 +41,18 @@ const num = (v, d = 0) => {
   return d;
 };
 
-// locate daily array on common keys or one level down
+// Try to find an array of daily rows on common keys or one level down
 const pickDailyArray = (raw = {}) => {
   if (!raw || typeof raw !== 'object') return [];
   const c = [];
-  for (const k of ['daily', 'dailySeries', 'items', 'rows', 'days', 'data']) if (Array.isArray(raw[k])) c.push(raw[k]);
+  for (const k of ['daily', 'dailySeries', 'items', 'rows', 'days', 'data']) {
+    if (Array.isArray(raw[k])) c.push(raw[k]);
+  }
   if (c.length) return c.sort((a, b) => b.length - a.length)[0];
-  for (const v of Object.values(raw)) if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;
+  // one level down as a fallback
+  for (const v of Object.values(raw)) {
+    if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;
+  }
   return [];
 };
 
@@ -40,7 +61,10 @@ const mapRow = (row, i) => {
   const keys = Object.keys(row).reduce((m, k) => ((m[k.toLowerCase()] = k), m), {});
   const get = (names) => {
     for (const n of names) if (keys[n.toLowerCase()]) return row[keys[n.toLowerCase()]];
-    for (const n of names) { const hit = Object.keys(keys).find((k) => k.includes(n.toLowerCase())); if (hit) return row[keys[hit]]; }
+    for (const n of names) {
+      const hit = Object.keys(keys).find((k) => k.includes(n.toLowerCase()));
+      if (hit) return row[keys[hit]];
+    }
     return undefined;
   };
   const date = get(['date', 'dt', 'daydate']);
@@ -53,41 +77,68 @@ const mapRow = (row, i) => {
     target:    num(get(['target', 'dailytarget', 'budget', 'goal', 'forecast'])),
     occupancy: num(get(['occupancy', 'occrate', 'occupancyrate', 'occ%'])),
     rate:      num(get(['rate', 'arr', 'adr', 'averagerate', 'avgrate'])),
-    met:       get(['met', 'hittarget', 'mettarget']) === true,
+    met:       get(['met','hittarget','mettarget']) === true,
   };
 };
 
-const filterAndDedupe = (rows, monthKey) => {
+const filterAndDedupeToMonth = (rows, monthKey) => {
   const start = fromKey(monthKey);
   const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1);
   const last  = dim(monthKey);
-  const score = (x) => (num(x.revenue) > 0 ? 2 : 0) + (num(x.target) > 0 ? 1 : 0);
-  const perDay = new Map();
+
+  // First, keep only rows inside the target month
+  const inMonth = [];
   for (const r of rows || []) {
-    if (r.date) { const d = new Date(r.date); if (!(d >= start && d < end)) continue; }
-    else if (!(r.day >= 1 && r.day <= last)) continue;
-    const prev = perDay.get(r.day);
-    if (!prev || score(r) >= score(prev)) perDay.set(r.day, r);
+    if (r.date) {
+      const d = new Date(r.date);
+      if (d >= start && d < end) inMonth.push(r);
+    } else if (r.day >= 1 && r.day <= last) {
+      inMonth.push(r);
+    }
   }
-  return Array.from(perDay.values()).sort((a, b) => a.day - b.day);
+
+  // Then, dedupe by picking the best record per day:
+  // prefer higher revenue; if tied, prefer higher target.
+  const byDay = new Map();
+  const better = (a, b) => {
+    const ra = num(a.revenue), rb = num(b.revenue);
+    if (rb > ra) return b;
+    if (rb < ra) return a;
+    const ta = num(a.target), tb = num(b.target);
+    return tb >= ta ? b : a;
+  };
+  for (const r of inMonth) {
+    const prev = byDay.get(r.day);
+    byDay.set(r.day, prev ? better(prev, r) : r);
+  }
+
+  return Array.from(byDay.values()).sort((a, b) => a.day - b.day);
 };
 
-// choose the most-common non-zero target to use for missing days
+// Choose the most-common non-zero target to use for filling gaps
 const modeTarget = (rows) => {
   const counts = new Map();
-  for (const r of rows) { const t = num(r.target, 0); if (t > 0) counts.set(t, (counts.get(t) || 0) + 1); }
+  for (const r of rows) {
+    const t = num(r.target, 0);
+    if (t > 0) counts.set(t, (counts.get(t) || 0) + 1);
+  }
   let best = 0, bestCnt = 0;
-  for (const [t, c] of counts) { if (c > bestCnt) { best = t; bestCnt = c; } }
+  for (const [t, c] of counts) {
+    if (c > bestCnt) { best = t; bestCnt = c; }
+  }
   return best || 0;
 };
 
-// ensure every day in month exists; synthesize missing days w/ target baseline
+// Ensure exactly one entry per day in the month: add only truly missing days
 const completeMonthDaily = (rows, monthKey) => {
   const days = dim(monthKey);
   const baseTarget = modeTarget(rows);
-  if (!baseTarget) return rows; // nothing we can infer
-  const have = new Set(rows.map(r => r.day));
+  if (!baseTarget) return rows; // can't infer anything meaningful
+
   const start = fromKey(monthKey);
+  const have = new Set(rows.map(r => r.day));
+
+  // Add placeholders only where completely missing
   for (let d = 1; d <= days; d++) {
     if (!have.has(d)) {
       rows.push({
@@ -101,34 +152,43 @@ const completeMonthDaily = (rows, monthKey) => {
       });
     }
   }
-  return rows.sort((a,b) => a.day - b.day);
+
+  // Final pass: ensure exactly one row per day (prefer rows with revenue)
+  const byDay = new Map();
+  const better = (a, b) => {
+    const ra = num(a.revenue), rb = num(b.revenue);
+    if (rb > ra) return b;
+    if (rb < ra) return a;
+    const ta = num(a.target), tb = num(b.target);
+    return tb >= ta ? b : a;
+  };
+  for (const r of rows) {
+    const prev = byDay.get(r.day);
+    byDay.set(r.day, prev ? better(prev, r) : r);
+  }
+
+  return Array.from(byDay.values()).sort((a, b) => a.day - b.day);
 };
 
 function buildPayload(overviewJson, dailyJson, monthKey) {
-  // normalize daily + restrict to the month
+  // Normalize daily & restrict to month, then fill gaps
   const dailyRaw = pickDailyArray(dailyJson || overviewJson || {});
   const mapped   = dailyRaw.map(mapRow).filter(Boolean);
-  let daily      = filterAndDedupe(mapped, monthKey);
+  let daily      = filterAndDedupeToMonth(mapped, monthKey);
+  daily          = completeMonthDaily(daily, monthKey);
 
-  // fill missing days with the mode target so totals reflect the full month
-  daily = completeMonthDaily(daily, monthKey);
-
-  // derive totals from daily
+  // Derive totals from the (now complete) daily series
   const sum = (k) => daily.reduce((a, r) => a + num(r[k]), 0);
-  const sumRev = sum('revenue');
-  const sumTgt = sum('target');
+  const revenueToDate = sum('revenue');
+  const targetToDate  = sum('target');
 
-  // averages from days that actually have values
+  // Averages only from days with values
   const occVals  = daily.map(d => num(d.occupancy)).filter(n => Number.isFinite(n) && n > 0);
   const rateVals = daily.map(d => num(d.rate)).filter(n => Number.isFinite(n) && n > 0);
-  const avgOcc   = occVals.length ? occVals.reduce((a,b)=>a+b,0) / occVals.length : 0;
-  const avgRate  = rateVals.length ? Math.round(rateVals.reduce((a,b)=>a+b,0) / rateVals.length) : 0;
+  const occupancyRate   = occVals.length ? (occVals.reduce((a,b)=>a+b,0) / occVals.length) : 0;
+  const averageRoomRate = rateVals.length ? Math.round(rateVals.reduce((a,b)=>a+b,0) / rateVals.length) : 0;
 
-  const revenueToDate   = sumRev;
-  const targetToDate    = sumTgt;
-  const occupancyRate   = avgOcc;
-  const averageRoomRate = avgRate;
-  const targetVariance  = (targetToDate || 0) - (revenueToDate || 0);
+  const targetVariance = (targetToDate || 0) - (revenueToDate || 0);
 
   return {
     revenueToDate,
@@ -136,7 +196,8 @@ function buildPayload(overviewJson, dailyJson, monthKey) {
     averageRoomRate,
     occupancyRate,
     targetVariance,
-    lastUpdated: overviewJson?.lastUpdated || overviewJson?.updatedAt || new Date().toISOString(),
+    lastUpdated:
+      overviewJson?.lastUpdated || overviewJson?.updatedAt || new Date().toISOString(),
     roomTypes: Array.isArray(overviewJson?.roomTypes) ? overviewJson.roomTypes : [],
     history:   Array.isArray(overviewJson?.history)   ? overviewJson.history   : [],
     daily,
@@ -156,16 +217,18 @@ export default async function handler(req, res) {
     const origin = `${(req.headers['x-forwarded-proto'] || 'https')}://${req.headers.host}`;
     const ts = Date.now();
 
-    // 1) Prefer spreadsheet import
+    // 1) Prefer spreadsheet /api/import-month
     try {
-      const r = await fetch(`${origin}/api/import-month?month=${month}&ts=${ts}`, { headers: { 'cache-control': 'no-store' } });
+      const r = await fetch(`${origin}/api/import-month?month=${month}&ts=${ts}`, {
+        headers: { 'cache-control': 'no-store' },
+      });
       if (r.ok && isJson(r)) {
         const j = await r.json();
         const payload = buildPayload(j?.overview ? j.overview : j, j, month);
         res.setHeader('X-Month-Source', 'import-month');
         return res.status(200).json(payload);
       }
-    } catch {}
+    } catch { /* fall through */ }
 
     // 2) Merge DB endpoints
     let overviewJson = null, dailyJson = null;
