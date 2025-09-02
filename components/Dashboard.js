@@ -223,43 +223,6 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
- feat/api-updates
-  const ov = useMemo(() => normalizeOverview(overview), [overview]);
-
-HEAD
-  // If overview didn’t include roomTypes, fetch them on the client as a fallback
-  useEffect(() => {
-    let abort = false;
-    async function loadRoomTypes() {
-      if (ov.roomTypes && Array.isArray(ov.roomTypes)) {
-        setRoomTypesState(ov.roomTypes);
-        return;
-      }
-      try {
-        const r = await fetch('/api/room-types', { cache: 'no-store' });
-        if (!r.ok) return;
-        const j = await r.json();
-        if (!abort) {
-          const list = Array.isArray(j?.items) ? j.items : j;
-          setRoomTypesState(list || null);
-        }
-      } catch {
-        // ignore – UI shows fallbacks
-      }
-    }
-    loadRoomTypes();
-    return () => { abort = true; };
-  }, [ov.roomTypes]);
-
-  /* ------------------------------ data ------------------------------ */
-
-  const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
-
-  /* ------------------------------ derived data ------------------------------ */
-bb86a5dca9293db80ba022033ce1c20ee3098ecb
-
-  const fallbackRoomTypeData = [
-
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
 
@@ -358,93 +321,11 @@ bb86a5dca9293db80ba022033ce1c20ee3098ecb
   /* ------------------------------ derived aggregates ------------------------------ */
 
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
-    main
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
     { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
     { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
   ];
-feat/api-updates
-HEAD
-
-  // ---------- derive + sort for Room Types ----------
-  const baseRoomTypeData = useMemo(() => {
-    const source = (roomTypesState && roomTypesState.length)
-      ? roomTypesState
-      : (ov.roomTypes || fallbackRoomTypeData);
-
-    return (source ?? []).map(r => {
-      const available = num(r.available ?? r.rooms ?? r.capacity, 0);
-      const sold      = num(r.sold ?? r.booked ?? r.nights, 0);
-      const revenue   = num(r.revenue, 0);
-
-      // Prefer explicit rate; if missing, derive ADR safely
-      const adr = Number.isFinite(num(r.rate))
-        ? num(r.rate)
-        : (sold ? Math.round(revenue / sold) : 0);
-
-      // Prefer provided occupancy; else compute from sold/available
-      const occRaw = (r.occupancy ?? r.occ ?? r.occupancyRate);
-      const occ = Number.isFinite(num(occRaw))
-        ? asPercent(occRaw, 0)
-        : (available ? (sold / available) * 100 : 0);
-
-      const revpar = available ? revenue / available : 0;
-
-      return {
-        ...r,
-        available,
-        sold,
-        revenue,
-        rate: adr,           // keep `rate` for existing UI labels
-        adr,                 // also expose `adr`
-        occupancy: Math.round(occ * 10) / 10,
-        revpar,
-      };
-    });
-  }, [roomTypesState, ov.roomTypes]);
-  // ---------- end derive ----------
-
-  // Sort state for the table
-  const [sortBy, setSortBy] = useState('revenue'); // default sort by revenue
-  const [sortDir, setSortDir] = useState('desc');
-
-  const toggleSort = (key) => {
-    if (key === sortBy) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(key);
-      setSortDir(key === 'type' ? 'asc' : 'desc'); // sensible defaults
-    }
-  };
-
-  const sortedRoomTypes = useMemo(() => {
-    const list = [...baseRoomTypeData];
-    list.sort((a, b) => {
-      if (sortBy === 'type') {
-        const av = (a.type || '').toString().toLowerCase();
-        const bv = (b.type || '').toString().toLowerCase();
-        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      }
-      const av = num(a[sortBy]);
-      const bv = num(b[sortBy]);
-      return sortDir === 'asc' ? av - bv : bv - av;
-    });
-    return list;
-  }, [baseRoomTypeData, sortBy, sortDir]);
-
-  const colorsMap = useMemo(() => {
-    // pin a color to each type for consistency across cards & table
-    const m = new Map();
-    sortedRoomTypes.forEach((r, i) => m.set(r.type, colors[i % colors.length]));
-    return m;
-  }, [sortedRoomTypes]);
-
-  const roomTypeData = sortedRoomTypes; // use sorted data everywhere below
-
-  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : fallbackRoomTypeData;
-
- main
   const roomTypeData = roomTypeRaw.map((rt) => {
     const available = num(rt.available, null);
     const sold      = num(rt.sold, null);
@@ -460,7 +341,6 @@ HEAD
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
-bb86a5dca9293db80ba022033ce1c20ee3098ecb
 
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
@@ -593,134 +473,6 @@ bb86a5dca9293db80ba022033ce1c20ee3098ecb
   );
 
   const RoomTypesView = () => {
-HEAD
-    const SortIcon = ({ col }) => (
-      <span className="ml-1 text-gray-400">
-        {sortBy !== col ? '↕' : sortDir === 'asc' ? '↑' : '↓'}
-      </span>
-    );
-
-    const Th = ({ label, col, right }) => (
-      <th className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider ${right ? 'text-right' : 'text-left'} text-gray-600`}>
-        <button onClick={() => toggleSort(col)} className="inline-flex items-center hover:text-gray-900">
-          {label}
-          <SortIcon col={col} />
-        </button>
-      </th>
-    );
-
-    return (
-      <div className="space-y-8">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {roomTypeData.map((room, index) => (
-            <MetricCard
-              key={room.type || index}
-              title={room.type}
-              value={`${Math.round(room.occupancy)}%`}
-              subtitle={`${currency(room.rate)} avg rate`}
-              icon={Home}
-              color={index % 2 === 0 ? 'blue' : 'green'}
-            />
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Revenue Share Pie */}
-          <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold mb-4">Room Type Revenue</h3>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={roomTypeData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ type, percent }) => `${type} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="revenue"
-                  >
-                    {roomTypeData.map((r, i) => (
-                      <Cell key={`cell-${i}`} fill={colorsMap.get(r.type) || colors[i % colors.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Bar-ish progress list */}
-          <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold mb-4">Room Type Performance</h3>
-            <div className="space-y-4">
-              {roomTypeData.map((room, i) => (
-                <div key={room.type || i} className="border-l-4 pl-4" style={{ borderColor: colorsMap.get(room.type) || colors[i % colors.length] }}>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">{room.type}</span>
-                    <span className="text-sm text-gray-500">
-                      {num(room.sold, 0)}/{num(room.available, 0)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Revenue: {currency(room.revenue)} | ADR: {currency(room.rate)} | RevPAR: {currency(room.revpar)}
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className="h-2 rounded-full"
-                      style={{
-                        width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
-                        backgroundColor: colorsMap.get(room.type) || colors[i % colors.length],
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* NEW: Sortable details table */}
-        <div className="bg-white p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-semibold mb-4">Room Type Details</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <Th label="Type" col="type" />
-                  <Th label="Available" col="available" right />
-                  <Th label="Sold" col="sold" right />
-                  <Th label="Occ %" col="occupancy" right />
-                  <Th label="ADR" col="rate" right />
-                  <Th label="RevPAR" col="revpar" right />
-                  <Th label="Revenue" col="revenue" right />
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {roomTypeData.map((r, i) => (
-                  <tr key={r.type || i} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-full"
-                          style={{ background: colorsMap.get(r.type) || colors[i % colors.length] }}
-                        />
-                        <span className="font-medium text-gray-900">{r.type}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{num(r.available)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{num(r.sold)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{pct(r.occupancy)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{currency(r.rate)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{currency(r.revpar)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold">{currency(r.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
     const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
     const [compact, setCompact] = useState(true);
@@ -863,7 +615,6 @@ HEAD
                 </BarChart>
               </ResponsiveContainer>
             </div>
-bb86a5dca9293db80ba022033ce1c20ee3098ecb
           </div>
         </div>
       </div>
