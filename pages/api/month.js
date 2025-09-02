@@ -1,7 +1,6 @@
 // pages/api/month.js
-// Priority: 1) /api/import-month (spreadsheet, strict)  2) DB merge  3) static
-// When spreadsheet is present, we use ONLY its data (no fillers, no DB).
-// KPI totals are derived by summing the returned daily rows.
+// 1) Prefer spreadsheet (/api/import-month), 2) merge DB endpoints, 3) static fallback
+// Completes missing month days using the most common daily target.
 
 export const config = { api: { bodyParser: false }, runtime: 'nodejs' };
 
@@ -9,9 +8,10 @@ const NO_STORE = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age
 const isJson = (r) => (r.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
 const fromKey = (key) => {
-  const [y, m] = String(key || '').split('-').map((x) => parseInt(x, 10));
+  const [y, m] = (key || '').split('-').map((x) => parseInt(x, 10));
   return new Date(Number.isFinite(y) ? y : new Date().getFullYear(), Number.isFinite(m) ? m - 1 : new Date().getMonth(), 1);
 };
+const pad2 = (n) => String(n).padStart(2, '0');
 const dim = (key) => { const d = fromKey(key); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
 const num = (v, d = 0) => {
   if (v == null) return d;
@@ -25,7 +25,7 @@ const num = (v, d = 0) => {
   return d;
 };
 
-// find a daily-array on common keys or one level down
+// locate daily array on common keys or one level down
 const pickDailyArray = (raw = {}) => {
   if (!raw || typeof raw !== 'object') return [];
   const c = [];
@@ -40,10 +40,7 @@ const mapRow = (row, i) => {
   const keys = Object.keys(row).reduce((m, k) => ((m[k.toLowerCase()] = k), m), {});
   const get = (names) => {
     for (const n of names) if (keys[n.toLowerCase()]) return row[keys[n.toLowerCase()]];
-    for (const n of names) {
-      const hit = Object.keys(keys).find((k) => k.includes(n.toLowerCase()));
-      if (hit) return row[keys[hit]];
-    }
+    for (const n of names) { const hit = Object.keys(keys).find((k) => k.includes(n.toLowerCase())); if (hit) return row[keys[hit]]; }
     return undefined;
   };
   const date = get(['date', 'dt', 'daydate']);
@@ -56,78 +53,89 @@ const mapRow = (row, i) => {
     target:    num(get(['target', 'dailytarget', 'budget', 'goal', 'forecast'])),
     occupancy: num(get(['occupancy', 'occrate', 'occupancyrate', 'occ%'])),
     rate:      num(get(['rate', 'arr', 'adr', 'averagerate', 'avgrate'])),
-    met:       get(['met','hittarget','mettarget']) === true,
+    met:       get(['met', 'hittarget', 'mettarget']) === true,
   };
 };
 
-// keep only rows inside month & dedupe per day (prefer higher revenue, then higher target)
-const filterAndDedupeToMonth = (rows, monthKey) => {
+const filterAndDedupe = (rows, monthKey) => {
   const start = fromKey(monthKey);
   const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1);
   const last  = dim(monthKey);
-
-  const inMonth = [];
+  const score = (x) => (num(x.revenue) > 0 ? 2 : 0) + (num(x.target) > 0 ? 1 : 0);
+  const perDay = new Map();
   for (const r of rows || []) {
-    if (r.date) { const d = new Date(r.date); if (d >= start && d < end) inMonth.push(r); }
-    else if (r.day >= 1 && r.day <= last) inMonth.push(r);
+    if (r.date) { const d = new Date(r.date); if (!(d >= start && d < end)) continue; }
+    else if (!(r.day >= 1 && r.day <= last)) continue;
+    const prev = perDay.get(r.day);
+    if (!prev || score(r) >= score(prev)) perDay.set(r.day, r);
   }
-
-  const byDay = new Map();
-  const better = (a, b) => {
-    const ra = num(a.revenue), rb = num(b.revenue);
-    if (rb > ra) return b;
-    if (rb < ra) return a;
-    const ta = num(a.target), tb = num(b.target);
-    return tb >= ta ? b : a;
-  };
-  for (const r of inMonth) {
-    const prev = byDay.get(r.day);
-    byDay.set(r.day, prev ? better(prev, r) : r);
-  }
-
-  return Array.from(byDay.values()).sort((a, b) => a.day - b.day);
+  return Array.from(perDay.values()).sort((a, b) => a.day - b.day);
 };
 
-function totalsFromDaily(daily) {
-  const sum = (k) => daily.reduce((a, r) => a + num(r[k]), 0);
-  const revenueToDate = sum('revenue');
-  const targetToDate  = sum('target');
+// choose the most-common non-zero target to use for missing days
+const modeTarget = (rows) => {
+  const counts = new Map();
+  for (const r of rows) { const t = num(r.target, 0); if (t > 0) counts.set(t, (counts.get(t) || 0) + 1); }
+  let best = 0, bestCnt = 0;
+  for (const [t, c] of counts) { if (c > bestCnt) { best = t; bestCnt = c; } }
+  return best || 0;
+};
 
-  const occVals  = daily.map(d => num(d.occupancy)).filter(n => Number.isFinite(n) && n > 0);
-  const rateVals = daily.map(d => num(d.rate)).filter(n => Number.isFinite(n) && n > 0);
+// ensure every day in month exists; synthesize missing days w/ target baseline
+const completeMonthDaily = (rows, monthKey) => {
+  const days = dim(monthKey);
+  const baseTarget = modeTarget(rows);
+  if (!baseTarget) return rows; // nothing we can infer
+  const have = new Set(rows.map(r => r.day));
+  const start = fromKey(monthKey);
+  for (let d = 1; d <= days; d++) {
+    if (!have.has(d)) {
+      rows.push({
+        day: d,
+        date: `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(d)}T00:00:00.000Z`,
+        revenue: 0,
+        target: baseTarget,
+        occupancy: 0,
+        rate: 0,
+        met: false,
+      });
+    }
+  }
+  return rows.sort((a,b) => a.day - b.day);
+};
 
-  const occupancyRate   = occVals.length ? (occVals.reduce((a,b)=>a+b,0) / occVals.length) : 0;
-  const averageRoomRate = rateVals.length ? Math.round(rateVals.reduce((a,b)=>a+b,0) / rateVals.length) : 0;
-  const targetVariance  = (targetToDate || 0) - (revenueToDate || 0);
-
-  return { revenueToDate, targetToDate, occupancyRate, averageRoomRate, targetVariance };
-}
-
-function buildPayloadStrict(overviewJsonOrNull, dailySource, monthKey) {
-  // STRICT path (spreadsheet): use only the provided daily rows (no fillers)
-  const dailyRaw = pickDailyArray(dailySource || {});
-  const mapped   = dailyRaw.map(mapRow).filter(Boolean);
-  const daily    = filterAndDedupeToMonth(mapped, monthKey);
-
-  const totals = totalsFromDaily(daily);
-  return {
-    ...totals,
-    lastUpdated: overviewJsonOrNull?.lastUpdated || overviewJsonOrNull?.updatedAt || new Date().toISOString(),
-    roomTypes: Array.isArray(overviewJsonOrNull?.roomTypes) ? overviewJsonOrNull.roomTypes : [],
-    history:   Array.isArray(overviewJsonOrNull?.history)   ? overviewJsonOrNull.history   : [],
-    daily,
-  };
-}
-
-function buildPayloadMerged(overviewJson, dailyJson, monthKey) {
-  // DB-merge path (still strict: no filler days)
+function buildPayload(overviewJson, dailyJson, monthKey) {
+  // normalize daily + restrict to the month
   const dailyRaw = pickDailyArray(dailyJson || overviewJson || {});
   const mapped   = dailyRaw.map(mapRow).filter(Boolean);
-  const daily    = filterAndDedupeToMonth(mapped, monthKey);
+  let daily      = filterAndDedupe(mapped, monthKey);
 
-  const totals = totalsFromDaily(daily);
+  // fill missing days with the mode target so totals reflect the full month
+  daily = completeMonthDaily(daily, monthKey);
+
+  // derive totals from daily
+  const sum = (k) => daily.reduce((a, r) => a + num(r[k]), 0);
+  const sumRev = sum('revenue');
+  const sumTgt = sum('target');
+
+  // averages from days that actually have values
+  const occVals  = daily.map(d => num(d.occupancy)).filter(n => Number.isFinite(n) && n > 0);
+  const rateVals = daily.map(d => num(d.rate)).filter(n => Number.isFinite(n) && n > 0);
+  const avgOcc   = occVals.length ? occVals.reduce((a,b)=>a+b,0) / occVals.length : 0;
+  const avgRate  = rateVals.length ? Math.round(rateVals.reduce((a,b)=>a+b,0) / rateVals.length) : 0;
+
+  const revenueToDate   = sumRev;
+  const targetToDate    = sumTgt;
+  const occupancyRate   = avgOcc;
+  const averageRoomRate = avgRate;
+  const targetVariance  = (targetToDate || 0) - (revenueToDate || 0);
+
   return {
-    ...totals,
+    revenueToDate,
+    targetToDate,
+    averageRoomRate,
+    occupancyRate,
+    targetVariance,
     lastUpdated: overviewJson?.lastUpdated || overviewJson?.updatedAt || new Date().toISOString(),
     roomTypes: Array.isArray(overviewJson?.roomTypes) ? overviewJson.roomTypes : [],
     history:   Array.isArray(overviewJson?.history)   ? overviewJson.history   : [],
@@ -148,19 +156,18 @@ export default async function handler(req, res) {
     const origin = `${(req.headers['x-forwarded-proto'] || 'https')}://${req.headers.host}`;
     const ts = Date.now();
 
-    // 1) STRICT SPREADSHEET PATH
+    // 1) Prefer spreadsheet import
     try {
       const r = await fetch(`${origin}/api/import-month?month=${month}&ts=${ts}`, { headers: { 'cache-control': 'no-store' } });
       if (r.ok && isJson(r)) {
         const j = await r.json();
-        const overviewMaybe = j?.overview && typeof j.overview === 'object' ? j.overview : null;
-        const payload = buildPayloadStrict(overviewMaybe, j, month);
-        res.setHeader('X-Month-Source', 'import-month (strict)');
+        const payload = buildPayload(j?.overview ? j.overview : j, j, month);
+        res.setHeader('X-Month-Source', 'import-month');
         return res.status(200).json(payload);
       }
-    } catch { /* continue */ }
+    } catch {}
 
-    // 2) DB MERGE PATH (still strict — no filler)
+    // 2) Merge DB endpoints
     let overviewJson = null, dailyJson = null;
     const [ovRes, dmRes] = await Promise.allSettled([
       fetch(`${origin}/api/overview?month=${month}&ts=${ts}`, { headers: { 'cache-control': 'no-store' } }),
@@ -174,12 +181,12 @@ export default async function handler(req, res) {
       dailyJson = await dmRes.value.json();
     }
     if (overviewJson || dailyJson) {
-      const payload = buildPayloadMerged(overviewJson, dailyJson, month);
-      res.setHeader('X-Month-Source', 'admin-db (merged, strict)');
+      const payload = buildPayload(overviewJson, dailyJson, month);
+      res.setHeader('X-Month-Source', 'admin-db (merged)');
       return res.status(200).json(payload);
     }
 
-    // 3) STATIC FALLBACK
+    // 3) Static fallback
     try {
       const { readFile } = await import('fs/promises');
       const { join } = await import('path');
@@ -194,13 +201,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'month endpoint failed', detail: String(e) });
   }
 }
-
-// After you build `payload` in each path:
-payload.__source = 'import-month (strict)';      // in the import-month branch
-// or:
-payload.__source = 'admin-db (merged, strict)';  // in the DB-merge branch
-// or:
-payload.__source = 'static (/public/data)';      // in the static branch
-
-// Before each `return res.status(200).json(payload)`
-
