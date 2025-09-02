@@ -1,4 +1,8 @@
 // pages/api/rs/index.js
+ feat/api-updates
+export default function handler(req, res) {
+  res.status(200).json({ ok: true, t: req.query.t || 'none' });
+
 export default async function handler(req, res) {
   const API = process.env.RS_API; // set in .env.local and on Vercel
   if (!API) return res.status(500).json({ error: 'RS_API env var not set' });
@@ -20,4 +24,5 @@ export default async function handler(req, res) {
   } catch (err) {
     res.status(500).json({ error: String(err?.message || err) });
   }
+ main
 }
