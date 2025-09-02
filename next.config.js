@@ -1,3 +1,5 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = { reactStrictMode: true };
+const nextConfig = {
+  productionBrowserSourceMaps: true, // <-- add this
+};
 module.exports = nextConfig;

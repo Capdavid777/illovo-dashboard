@@ -1,0 +1,47 @@
+import json
+from datetime import date, timedelta
+
+# Create a scaffold for September 2025
+start_date = date(2025, 9, 1)
+end_date = date(2025, 9, 30)
+
+daily = []
+for i in range((end_date - start_date).days + 1):
+    d = start_date + timedelta(days=i)
+    daily.append({
+        "date": d.isoformat(),
+        "day": d.day,
+        "target": 0,
+        "revenue": 0,
+        "occupancy": 0,
+        "rate": 0
+    })
+
+scaffold = {
+    "overview": {
+        "revenueToDate": 0,
+        "targetToDate": 0,
+        "averageRoomRate": 0,
+        "occupancyRate": 0,
+        "lastUpdated": "2025-09-01T00:00:00",
+        "daily": daily,
+        "roomTypes": [
+            { "type": "Queen", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+            { "type": "Deluxe Studio", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+            { "type": "1 Bed", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+            { "type": "2 Bed", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 }
+        ],
+        "history": [
+            { "year": "2022", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+            { "year": "2023", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+            { "year": "2024", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+            { "year": "2025", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 }
+        ]
+    }
+}
+
+out_path = "/mnt/data/2025-09.json"
+with open(out_path, "w") as f:
+    json.dump(scaffold, f, indent=2)
+
+out_path
