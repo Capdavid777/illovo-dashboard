@@ -40,17 +40,12 @@ model RoomTypeMetric {
 }
 
 model YearMetric {
-  id        Int      @id @default(autoincrement())
-  year      Int      @unique               // e.g. 2022, 2023, 2024...
-  roomsSold Int      @default(0)
-  occupancy Float    @default(0)           // store as percent 0..100
-  revenue   Int      @default(0)
-  rate      Int      @default(0)           // ADR
-  year      Int      @unique               // e.g., 2022, 2023, 2024...
-  roomsSold Int      @default(0)
-  occupancy Float    @default(0)           // store as percentage 0..100
-  revenue   Int      @default(0)
-  rate      Int      @default(0)
+  id        Int   @id @default(autoincrement())
+  year      Int   @unique // e.g. 2022, 2023, 2024...
+  roomsSold Int   @default(0)
+  occupancy Float @default(0) // store as percent 0..100
+  revenue   Int   @default(0)
+  rate      Int   @default(0) // ADR
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
