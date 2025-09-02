@@ -7,9 +7,18 @@ let prisma = globalThis.__prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalThis.__prisma = prisma;
 
 const toNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
-const endOfToday   = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
 const normalizePct = (n) => (!Number.isFinite(n) ? 0 : (n <= 1.5 ? n * 100 : n));
+
+const parseMonthKey = (key) => {
+  if (!key || !/^\d{4}-\d{2}$/.test(key)) return null;
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+};
+const monthRangeUTC = (key) => {
+  const start = parseMonthKey(key) || new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+  const end   = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+  return { start, end };
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -23,12 +32,12 @@ export default async function handler(req, res) {
   res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
 
   try {
-    const from = startOfMonth();
-    const to   = endOfToday();
+    const { month } = req.query;
+    const { start, end } = monthRangeUTC(month);
 
     /* ----- Overview (DailyMetric) ----- */
     const rows = await prisma.dailyMetric.findMany({
-      where: { date: { gte: from, lte: to } },
+      where: { date: { gte: start, lt: end } },  // <— IMPORTANT: use requested month
       orderBy: { date: 'asc' },
       select: { date: true, revenue: true, target: true, occupancy: true, arr: true, createdAt: true, updatedAt: true },
     });
@@ -63,7 +72,7 @@ export default async function handler(req, res) {
 
     /* ----- Room Types (aggregate month-to-date) ----- */
     const rts = await prisma.roomTypeMetric.findMany({
-      where: { date: { gte: from, lte: to } },
+      where: { date: { gte: start, lt: end } },
       select: { type: true, available: true, sold: true, revenue: true, rate: true, occupancy: true },
     });
 
