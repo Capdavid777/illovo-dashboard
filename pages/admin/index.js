@@ -1,11 +1,11 @@
-﻿'use client';
+﻿// pages/admin/index.js
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-// ---------- helpers ----------
+/* ------------------------------ helpers ------------------------------ */
 
-// format YYYY-MM-DD for <input type="date">
+// format YYYY-MM-DD for <input type="date"> using local time
 function isoDate(d = new Date()) {
   const tzOff = d.getTimezoneOffset();
   const local = new Date(d.getTime() - tzOff * 60_000);
@@ -22,12 +22,12 @@ function fmtDate(v) {
   return local.toISOString().slice(0, 10);
 }
 
-// show occupancy as a percentage; handle old fractional rows (e.g. 0.57 -> 57%)
+// show occupancy as a percentage; handle old fractional rows (0.57 -> 57%)
 function fmtOcc(v) {
   if (v == null || v === '') return '—';
   const n = Number(v);
   if (!Number.isFinite(n)) return '—';
-  const pct = n <= 1 ? n * 100 : n; // old fractional values vs percent values
+  const pct = n <= 1 ? n * 100 : n; // fractions vs percents
   return `${Math.round(pct * 10) / 10}%`;
 }
 
@@ -39,6 +39,13 @@ function fmtNum(v) {
   return n.toLocaleString();
 }
 
+// parse JSON safely
+async function safeJson(res) {
+  try { return await res.json(); } catch { return {}; }
+}
+
+/* ------------------------------ page ------------------------------ */
+
 export default function AdminPage() {
   const [date, setDate] = useState(isoDate());
   const [revenue, setRevenue] = useState('');
@@ -49,17 +56,23 @@ export default function AdminPage() {
 
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setError('');
+    setLoading(true);
     try {
       const r = await fetch('/api/daily-metrics');
-      const j = await r.json();
+      const j = await safeJson(r);
+      if (!r.ok) throw new Error(j.error || 'Failed to load recent entries');
       setItems(Array.isArray(j.items) ? j.items : []);
     } catch (err) {
       console.error(err);
       setItems([]);
       setError('Failed to load recent entries');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,28 +88,31 @@ export default function AdminPage() {
       date, // YYYY-MM-DD
       revenue: revenue === '' ? null : Number(revenue),
       target: target === '' ? null : Number(target),
-      occupancy: occupancy === '' ? null : Number(occupancy), // expected as percent 0..100
+      occupancy: occupancy === '' ? null : Number(occupancy), // percent 0..100
       arr: arr === '' ? null : Number(arr),
       notes: notes || null,
     };
 
+    setSaving(true);
     try {
       const r = await fetch('/api/daily-metrics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const j = await r.json();
+      const j = await safeJson(r);
 
       if (!r.ok || j.ok === false) {
         throw new Error(j.error || 'Save failed');
       }
 
-      // reload table and keep form values as-is (your choice)
+      // reload table (leave form as-is)
       await load();
     } catch (err) {
       console.error(err);
       setError('Save failed');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -118,6 +134,7 @@ export default function AdminPage() {
                 id="date"
                 type="date"
                 value={date}
+                required
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
@@ -128,6 +145,7 @@ export default function AdminPage() {
                 id="revenue"
                 inputMode="numeric"
                 type="number"
+                min="0"
                 placeholder="e.g. 250000"
                 value={revenue}
                 onChange={(e) => setRevenue(e.target.value)}
@@ -140,6 +158,7 @@ export default function AdminPage() {
                 id="target"
                 inputMode="numeric"
                 type="number"
+                min="0"
                 placeholder="e.g. 300000"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
@@ -167,6 +186,7 @@ export default function AdminPage() {
                 id="arr"
                 inputMode="numeric"
                 type="number"
+                min="0"
                 placeholder="e.g. 1450"
                 value={arr}
                 onChange={(e) => setArr(e.target.value)}
@@ -185,7 +205,9 @@ export default function AdminPage() {
           </div>
 
           <div className="actions">
-            <button type="submit">Save / Upsert</button>
+            <button type="submit" disabled={saving} aria-busy={saving}>
+              {saving ? 'Saving…' : 'Save / Upsert'}
+            </button>
             {error && <span className="error">{error}</span>}
           </div>
         </form>
@@ -194,13 +216,19 @@ export default function AdminPage() {
       <section className="list">
         <header>
           <h2>Recent Entries</h2>
-          <a href="#" onClick={(e) => { e.preventDefault(); load(); }}>
-            Refresh
-          </a>
+          <button
+            type="button"
+            className="linklike"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
         </header>
 
         {items.length === 0 ? (
-          <p>No data yet.</p>
+          <p>{loading ? 'Loading…' : 'No data yet.'}</p>
         ) : (
           <table>
             <thead>
@@ -325,7 +353,18 @@ function Styles() {
         font-weight: 600;
         cursor: pointer;
       }
-      button:hover { filter: brightness(1.07); }
+      button:hover:not([disabled]) { filter: brightness(1.07); }
+      button[disabled] { opacity: 0.8; cursor: default; }
+
+      .linklike {
+        background: transparent;
+        color: var(--link);
+        text-decoration: underline;
+        font-size: 14px;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+      }
 
       .error { margin-left: 12px; color: #f87171; font-size: 13px; }
 
@@ -343,8 +382,6 @@ function Styles() {
         align-items: center;
         margin-bottom: 10px;
       }
-
-      .list a { color: var(--link); text-decoration: underline; font-size: 14px; }
 
       table { width: 100%; border-collapse: collapse; }
       th, td {
