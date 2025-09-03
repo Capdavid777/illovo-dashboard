@@ -1,47 +1,53 @@
-import json
-from datetime import date, timedelta
-
-# Create a scaffold for September 2025
-start_date = date(2025, 9, 1)
-end_date = date(2025, 9, 30)
-
-daily = []
-for i in range((end_date - start_date).days + 1):
-    d = start_date + timedelta(days=i)
-    daily.append({
-        "date": d.isoformat(),
-        "day": d.day,
-        "target": 0,
-        "revenue": 0,
-        "occupancy": 0,
-        "rate": 0
-    })
-
-scaffold = {
-    "overview": {
-        "revenueToDate": 0,
-        "targetToDate": 0,
-        "averageRoomRate": 0,
-        "occupancyRate": 0,
-        "lastUpdated": "2025-09-01T00:00:00",
-        "daily": daily,
-        "roomTypes": [
-            { "type": "Queen", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
-            { "type": "Deluxe Studio", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
-            { "type": "1 Bed", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
-            { "type": "2 Bed", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 }
-        ],
-        "history": [
-            { "year": "2022", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
-            { "year": "2023", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
-            { "year": "2024", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
-            { "year": "2025", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 }
-        ]
-    }
+{
+  "overview": {
+    "revenueToDate": 0,
+    "targetToDate": 0,
+    "averageRoomRate": 0,
+    "occupancyRate": 0,
+    "lastUpdated": "2025-09-01T00:00:00",
+    "daily": [
+      { "date": "2025-09-01", "day": 1, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-02", "day": 2, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-03", "day": 3, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-04", "day": 4, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-05", "day": 5, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-06", "day": 6, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-07", "day": 7, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-08", "day": 8, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-09", "day": 9, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-10", "day": 10, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-11", "day": 11, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-12", "day": 12, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-13", "day": 13, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-14", "day": 14, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-15", "day": 15, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-16", "day": 16, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-17", "day": 17, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-18", "day": 18, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-19", "day": 19, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-20", "day": 20, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-21", "day": 21, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-22", "day": 22, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-23", "day": 23, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-24", "day": 24, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-25", "day": 25, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-26", "day": 26, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-27", "day": 27, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-28", "day": 28, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-29", "day": 29, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-09-30", "day": 30, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 }
+    ],
+    "roomTypes": [
+      { "type": "Queen",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "Deluxe Studio", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "1 Bed",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "2 Bed",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 }
+    ],
+    "history": [
+      { "year": "2022", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2023", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2024", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2025", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 }
+    ]
+  }
 }
-
-out_path = "/mnt/data/2025-09.json"
-with open(out_path, "w") as f:
-    json.dump(scaffold, f, indent=2)
-
-out_path
