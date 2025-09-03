@@ -1,5 +1,3 @@
-'use client';
-
 import React, { useState } from 'react';
 import Link from 'next/link';
 
@@ -11,6 +9,8 @@ export default function AdminImportPage() {
   const [msg, setMsg] = useState('');
   const [isError, setIsError] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+
+  const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -26,12 +26,14 @@ export default function AdminImportPage() {
     try {
       setIsBusy(true);
       const fd = new FormData();
-      fd.append('file', file);                // IMPORTANT: must be 'file'
+      fd.append('file', file); // must be 'file'
       fd.append('year', String(year));
       fd.append('month', String(month));
 
       const r = await fetch('/api/import', { method: 'POST', body: fd });
-      const j = await r.json();
+
+      let j = {};
+      try { j = await r.json(); } catch { /* ignore parse errors */ }
 
       if (!r.ok || j.ok === false) {
         setIsError(true);
@@ -41,6 +43,8 @@ export default function AdminImportPage() {
 
       setMsg(`Imported ${j.imported || 0} day(s). Go back to Admin to verify.`);
       setIsError(false);
+      setFile(null); // optional: clear file input
+      // Optionally also e.target.reset();
     } catch (err) {
       console.error(err);
       setIsError(true);
@@ -66,7 +70,11 @@ export default function AdminImportPage() {
                 id="year"
                 type="number"
                 value={year}
-                onChange={(e) => setYear(+e.target.value)}
+                required
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setYear(Number.isFinite(val) ? val : now.getFullYear());
+                }}
               />
             </div>
 
@@ -78,7 +86,11 @@ export default function AdminImportPage() {
                 min={1}
                 max={12}
                 value={month}
-                onChange={(e) => setMonth(+e.target.value)}
+                required
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setMonth(Number.isFinite(val) ? clamp(val, 1, 12) : 1);
+                }}
               />
             </div>
 
@@ -86,16 +98,17 @@ export default function AdminImportPage() {
               <label htmlFor="file">Report file (.xlsx or .csv)</label>
               <input
                 id="file"
-                name="file"                 // IMPORTANT: must be 'file'
+                name="file" // must be 'file'
                 type="file"
                 accept=".xlsx,.csv"
+                required
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </div>
           </div>
 
           <div className="actions">
-            <button type="submit" disabled={isBusy}>
+            <button type="submit" disabled={isBusy} aria-busy={isBusy}>
               {isBusy ? 'Uploading…' : 'Upload & Import'}
             </button>
             {msg && (
@@ -110,7 +123,6 @@ export default function AdminImportPage() {
   );
 }
 
-/** same styling block used by your Admin page */
 function Styles() {
   return (
     <style jsx global>{`
@@ -125,7 +137,6 @@ function Styles() {
         --ok: #10b981;
         --err: #ef4444;
       }
-
       html, body {
         background: var(--bg);
         color: var(--text);
@@ -133,7 +144,6 @@ function Styles() {
           Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji',
           'Segoe UI Emoji';
       }
-
       main {
         max-width: 980px;
         margin: 40px auto;
@@ -142,43 +152,22 @@ function Styles() {
         border-radius: 12px;
         background: var(--card);
       }
-
       .topbar {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 16px;
       }
-
-      h1 {
-        font-size: 22px;
-        margin: 0;
-      }
-
-      .link {
-        color: var(--link);
-        text-decoration: underline;
-      }
-
+      h1 { font-size: 22px; margin: 0; }
+      .link { color: var(--link); text-decoration: underline; }
       .form { margin-top: 8px; }
-
       .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 16px;
       }
-
-      .row > div {
-        display: flex;
-        flex-direction: column;
-      }
-
-      label {
-        font-size: 13px;
-        color: var(--muted);
-        margin: 0 0 6px;
-      }
-
+      .row > div { display: flex; flex-direction: column; }
+      label { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
       input[type='text'],
       input[type='number'],
       input[type='date'],
@@ -191,9 +180,7 @@ function Styles() {
         padding: 10px 12px;
         outline: none;
       }
-
       .actions { margin-top: 12px; }
-
       button {
         background: var(--accent);
         color: #fff;
@@ -205,10 +192,8 @@ function Styles() {
       }
       button[disabled] { opacity: 0.75; cursor: default; }
       button:hover:not([disabled]) { filter: brightness(1.07); }
-
       .error { margin-left: 12px; color: var(--err); font-size: 13px; }
       .success { margin-left: 12px; color: var(--ok); font-size: 13px; }
-
       @media (max-width: 640px) {
         main { margin: 12px; padding: 16px; }
         .row { grid-template-columns: 1fr; }
