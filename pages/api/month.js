@@ -1,6 +1,6 @@
 // pages/api/month.js
 // 1) Merge DB endpoints (/api/overview + /api/daily-metrics)
-// 2) Static fallback in /public/data/{YYYY-MM}.json
+// 2) Static fallback in /public/data/{YYYY-MM}.json (supports { overview: {...} } files)
 // Completes missing month days using the most common daily target.
 
 export const config = { api: { bodyParser: false }, runtime: 'nodejs' };
@@ -37,10 +37,11 @@ const num = (v, d = 0) => {
   return d;
 };
 
+// Normalize occupancy: accept 0..1 or 0..100
 const pct = (v) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return 0;
-  return n <= 1.5 ? n * 100 : n; // normalize 0..1 -> %
+  return n <= 1.5 ? n * 100 : n;
 };
 
 // locate daily array on common keys or one level down
@@ -83,6 +84,7 @@ const mapRow = (row, i) => {
   };
 };
 
+// keep only requested month & dedupe by best information per day
 const filterAndDedupe = (rows, monthKey) => {
   const start = fromKey(monthKey);
   const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
@@ -107,8 +109,7 @@ const modeTarget = (rows) => {
     const t = num(r.target, 0);
     if (t > 0) counts.set(t, (counts.get(t) || 0) + 1);
   }
-  let best = 0,
-    bestCnt = 0;
+  let best = 0, bestCnt = 0;
   for (const [t, c] of counts) if (c > bestCnt) (best = t), (bestCnt = c);
   return best || 0;
 };
@@ -124,7 +125,7 @@ const completeMonthDaily = (rows, monthKey) => {
     if (!have.has(d)) {
       rows.push({
         day: d,
-        // ISO string at local midnight, represented as UTC Z (OK for charts/serialization)
+        // ISO at local midnight represented as UTC Z (fine for charts/serialization)
         date: `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(d)}T00:00:00.000Z`,
         revenue: 0,
         target: baseTarget,
@@ -138,20 +139,18 @@ const completeMonthDaily = (rows, monthKey) => {
 };
 
 function buildPayload(overviewJson, dailyJson, monthKey) {
-  // normalize daily + restrict to the month
+  // daily normalization
   const dailyRaw = pickDailyArray(dailyJson || overviewJson || {});
   const mapped = dailyRaw.map(mapRow).filter(Boolean);
   let daily = filterAndDedupe(mapped, monthKey);
-
-  // fill missing days with the mode target so totals reflect the full month
   daily = completeMonthDaily(daily, monthKey);
 
-  // derive totals from daily
+  // derive totals
   const sum = (k) => daily.reduce((a, r) => a + num(r[k]), 0);
   const revenueToDate = sum('revenue');
   const targetToDate = sum('target');
 
-  // averages from days that actually have values
+  // averages from days with values
   const occVals = daily.map((d) => num(d.occupancy)).filter((n) => Number.isFinite(n) && n > 0);
   const rateVals = daily.map((d) => num(d.rate)).filter((n) => Number.isFinite(n) && n > 0);
   const occupancyRate = occVals.length ? occVals.reduce((a, b) => a + b, 0) / occVals.length : 0;
@@ -161,15 +160,34 @@ function buildPayload(overviewJson, dailyJson, monthKey) {
 
   const targetVariance = (targetToDate || 0) - (revenueToDate || 0);
 
+  // try to reuse provided aggregates if available (but normalize occupancy)
+  const top = overviewJson && typeof overviewJson === 'object' ? overviewJson : {};
+
+  const normalizedRoomTypes = Array.isArray(top.roomTypes)
+    ? top.roomTypes.map((t) => ({
+        ...t,
+        occupancy: pct(t.occupancy),
+      }))
+    : [];
+
+  const normalizedHistory = Array.isArray(top.history)
+    ? top.history.map((y) => ({
+        ...y,
+        occupancy: pct(y.occupancy),
+      }))
+    : [];
+
   return {
-    revenueToDate,
-    targetToDate,
-    averageRoomRate,
-    occupancyRate,
-    targetVariance,
-    lastUpdated: overviewJson?.lastUpdated || overviewJson?.updatedAt || new Date().toISOString(),
-    roomTypes: Array.isArray(overviewJson?.roomTypes) ? overviewJson.roomTypes : [],
-    history: Array.isArray(overviewJson?.history) ? overviewJson.history : [],
+    revenueToDate: Number.isFinite(top.revenueToDate) ? top.revenueToDate : revenueToDate,
+    targetToDate: Number.isFinite(top.targetToDate) ? top.targetToDate : targetToDate,
+    averageRoomRate: Number.isFinite(top.averageRoomRate) ? top.averageRoomRate : averageRoomRate,
+    occupancyRate: Number.isFinite(top.occupancyRate) ? pct(top.occupancyRate) : occupancyRate,
+    targetVariance:
+      Number.isFinite(top.targetVariance) ? top.targetVariance : targetVariance,
+    lastUpdated:
+      top.lastUpdated || top.updatedAt || new Date().toISOString(),
+    roomTypes: normalizedRoomTypes,
+    history: normalizedHistory,
     daily,
   };
 }
@@ -207,7 +225,7 @@ export default async function handler(req, res) {
     const origin = `${(req.headers['x-forwarded-proto'] || 'https')}://${req.headers.host}`;
     const ts = Date.now();
 
-    // Try DB endpoints
+    // Try DB endpoints first
     const [overviewJson, dailyJson] = await Promise.all([
       fetchJson(`${origin}/api/overview?month=${month}&ts=${ts}`),
       fetchJson(`${origin}/api/daily-metrics?month=${month}&ts=${ts}`),
@@ -219,14 +237,20 @@ export default async function handler(req, res) {
       return res.status(200).json(payload);
     }
 
-    // Static fallback
+    // Static fallback — supports files shaped as { overview: {...} } (your current format)
     try {
       const { readFile } = await import('fs/promises');
       const { join } = await import('path');
       const file = join(process.cwd(), 'public', 'data', `${month}.json`);
       const txt = await readFile(file, 'utf8');
+      const raw = JSON.parse(txt);
+
+      // unwrap if file is { overview: {...} }, else use as-is
+      const top = raw && typeof raw === 'object' && raw.overview ? raw.overview : raw;
+      const payload = buildPayload(top, raw, month);
+
       res.setHeader('X-Month-Source', 'static (/public/data)');
-      return res.status(200).json(JSON.parse(txt));
+      return res.status(200).json(payload);
     } catch {
       // fall through
     }
