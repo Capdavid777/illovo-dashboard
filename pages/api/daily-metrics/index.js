@@ -1,71 +1,88 @@
 // pages/api/daily-metrics/index.js
-import { PrismaClient } from '@prisma/client'
-const prisma = global.prisma || new PrismaClient()
-if (process.env.NODE_ENV !== 'production') global.prisma = prisma
+import prisma from '../../../lib/prisma'; // use the singleton
+// import { getSession } from '@auth0/nextjs-auth0'; // optional: auth-guard
 
-const parseMonthKey = (key) => {
-  if (!key || !/^\d{4}-\d{2}$/.test(key)) return null
-  const [y, m] = key.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0))
-}
-const monthRangeUTC = (key) => {
-  const start = parseMonthKey(key) || new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1))
-  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
-  return { start, end }
-}
+// Parse "YYYY-MM" (local)
+const parseMonthKeyLocal = (key) => {
+  if (!key || !/^\d{4}-\d{2}$/.test(key)) return null;
+  const [y, m] = key.split('-').map(Number);
+  // Local-time month start
+  return new Date(y, m - 1, 1, 0, 0, 0, 0);
+};
+
+// Local month range [start, nextMonth)
+const monthRangeLocal = (key) => {
+  const now = new Date();
+  const start =
+    parseMonthKeyLocal(key) ?? new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
+  return { start, end };
+};
 
 export default async function handler(req, res) {
+  // OPTIONAL: require login for writes/reads
+  // const session = await getSession(req, res);
+  // if (!session?.user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+
   if (req.method === 'GET') {
     try {
-      const { month } = req.query
-      const { start, end } = monthRangeUTC(month)
+      const { month } = req.query;
+      const { start, end } = monthRangeLocal(month);
 
       const items = await prisma.dailyMetric.findMany({
         where: { date: { gte: start, lt: end } },
-        orderBy: { date: 'asc' },       // day 1..31
-        // no take: return the whole month (<= 31 rows)
-      })
+        orderBy: { date: 'asc' },
+      });
 
-      res.setHeader('Cache-Control', 'no-store')
-      return res.status(200).json({ ok: true, items })
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ ok: true, items });
     } catch (err) {
-      console.error(err)
-      return res.status(500).json({ ok: false, error: 'GET_FAILED' })
+      console.error(err);
+      return res.status(500).json({ ok: false, error: 'GET_FAILED' });
     }
   }
 
   if (req.method === 'POST') {
     try {
-      const { date, revenue, target, occupancy, arr, notes } = req.body || {}
-      const d = new Date(date) // expect 'YYYY-MM-DD'
-      if (Number.isNaN(d.getTime())) return res.status(400).json({ ok: false, error: 'BAD_DATE' })
+      const { date, revenue, target, occupancy, arr, notes } = req.body || {};
+      const d = new Date(date); // expect 'YYYY-MM-DD'
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ ok: false, error: 'BAD_DATE' });
+      }
+
+      const toNumOrNull = (v) =>
+        v !== '' && v != null ? Number(v) : null;
 
       const item = await prisma.dailyMetric.upsert({
         where: { date: d },
         update: {
-          revenue: revenue !== '' && revenue != null ? Number(revenue) : null,
-          target: target !== '' && target != null ? Number(target) : null,
-          occupancy: occupancy !== '' && occupancy != null ? Number(occupancy) : null,
-          arr: arr !== '' && arr != null ? Number(arr) : null,
+          revenue: toNumOrNull(revenue),
+          target: toNumOrNull(target),
+          occupancy: toNumOrNull(occupancy), // percent 0..100
+          arr: toNumOrNull(arr),
           notes: notes ?? '',
         },
         create: {
           date: d,
-          revenue: revenue !== '' && revenue != null ? Number(revenue) : null,
-          target: target !== '' && target != null ? Number(target) : null,
-          occupancy: occupancy !== '' && occupancy != null ? Number(occupancy) : null,
-          arr: arr !== '' && arr != null ? Number(arr) : null,
+          revenue: toNumOrNull(revenue),
+          target: toNumOrNull(target),
+          occupancy: toNumOrNull(occupancy),
+          arr: toNumOrNull(arr),
           notes: notes ?? '',
         },
-      })
-      return res.status(200).json({ ok: true, item })
+      });
+
+      // no-store for dynamic data
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ ok: true, item });
     } catch (err) {
-      console.error(err)
-      return res.status(500).json({ ok: false, error: 'UPSERT_FAILED' })
+      console.error(err);
+      return res.status(500).json({ ok: false, error: 'UPSERT_FAILED' });
     }
   }
 
-  res.setHeader('Allow', ['GET', 'POST'])
-  return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' })
+  res.setHeader('Allow', ['GET', 'POST']);
+  return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
 }
-export const config = { runtime: 'nodejs' }
+
+export const config = { runtime: 'nodejs' };
