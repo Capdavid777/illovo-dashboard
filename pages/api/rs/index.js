@@ -1,28 +1,67 @@
 // pages/api/rs/index.js
- feat/api-updates
-export default function handler(req, res) {
-  res.status(200).json({ ok: true, t: req.query.t || 'none' });
+export const config = { runtime: 'nodejs' };
+
+const ALLOWED_T = new Set(['summary', 'detail', 'rooms', 'month']); // adjust if needed
 
 export default async function handler(req, res) {
-  const API = process.env.RS_API; // set in .env.local and on Vercel
-  if (!API) return res.status(500).json({ error: 'RS_API env var not set' });
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
+  }
 
-  const t = (req.query.t || 'summary').toString();
-  const month = (req.query.month || '').toString();
+  const API = process.env.RS_API; // e.g. https://your-upstream.example/api
+  if (!API) return res.status(500).json({ ok: false, error: 'RS_API env var not set' });
 
-  const url = new URL(API);
-  url.searchParams.set('t', t);
-  if (month) url.searchParams.set('month', month);
+  const t = String(req.query.t ?? 'summary');
+  const month = req.query.month ? String(req.query.month) : '';
+
+  // Optional: basic validation
+  if (t && !ALLOWED_T.has(t)) {
+    return res.status(400).json({ ok: false, error: 'INVALID_T' });
+  }
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ ok: false, error: 'INVALID_MONTH' });
+  }
+
+  // Build upstream URL
+  let upstream;
+  try {
+    upstream = new URL(API);
+  } catch {
+    return res.status(500).json({ ok: false, error: 'RS_API is not a valid URL' });
+  }
+  upstream.searchParams.set('t', t);
+  if (month) upstream.searchParams.set('month', month);
+
+  // Optional: timeout guard
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort(), 15_000);
 
   try {
-    const r = await fetch(url.toString(), { cache: 'no-store' });
-    if (!r.ok) throw new Error(`Upstream ${r.status} ${r.statusText}`);
-    const data = await r.json();
+    const r = await fetch(upstream.toString(), {
+      cache: 'no-store',
+      signal: ac.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      return res
+        .status(502)
+        .json({ ok: false, error: `Upstream ${r.status} ${r.statusText}`, body: text.slice(0, 500) });
+    }
+
+    const data = await r.json().catch(() => ({}));
+
+    // No caching; allow simple cross-origin GET usage
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.status(200).json(data);
+
+    return res.status(200).json(data);
   } catch (err) {
-    res.status(500).json({ error: String(err?.message || err) });
+    const msg = err?.name === 'AbortError' ? 'UPSTREAM_TIMEOUT' : (err?.message || String(err));
+    return res.status(502).json({ ok: false, error: msg });
+  } finally {
+    clearTimeout(timeout);
   }
- main
 }
