@@ -1,45 +1,68 @@
 // pages/api/month.js
-export const config = { api: { bodyParser: false }, runtime: 'nodejs' };
+import fs from 'fs/promises';
+import path from 'path';
+import { Pool } from 'pg';
 
-const NO_STORE = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
-const isJson = (r) => (r.headers.get('content-type') || '').toLowerCase().includes('application/json');
-const safeJson = async (res) => (res && res.ok ? await res.json().catch(() => null) : null);
+let pool;
+function getPool() {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
+  return pool;
+}
+
+async function readFromDb(monthKey) {
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS reports (
+        key TEXT PRIMARY KEY,
+        content JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    const { rows } = await client.query(
+      'SELECT content FROM reports WHERE key = $1 LIMIT 1',
+      [`${monthKey}.json`]
+    );
+    return rows[0]?.content || null;
+  } finally {
+    client.release();
+  }
+}
+
+async function readFromPublic(monthKey) {
+  try {
+    const file = path.join(process.cwd(), 'public', 'data', `${monthKey}.json`);
+    const buf = await fs.readFile(file);
+    return JSON.parse(buf.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
+  const month = String(req.query.month || '').trim();
+  // support “YYYY-MM” or “YYYY-MM.json”
+  const m = month.replace(/\.json$/i, '');
+  if (!/^\d{4}-\d{2}$/.test(m)) {
+    return res.status(400).json({ error: 'BAD_MONTH', message: 'Use ?month=YYYY-MM' });
   }
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', NO_STORE);
-
-  const month = String(req.query.month || '').slice(0, 7);
-  if (!/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM.' });
-  }
-
-  const origin = `${(req.headers['x-forwarded-proto'] || 'https')}://${req.headers.host}`;
-  const base = origin.replace(/\/$/, '');
 
   try {
-    const [ovRes, dmRes] = await Promise.all([
-      fetch(`${base}/api/overview?month=${month}`, { cache: 'no-store' }),
-      fetch(`${base}/api/daily-metrics?month=${month}`, { cache: 'no-store' }),
-    ]);
-    const [ov, dm] = await Promise.all([safeJson(ovRes), safeJson(dmRes)]);
+    const fromDb = await readFromDb(m);
+    if (fromDb) return res.status(200).json(fromDb);
 
-    const overview = ov && (ov.overview || ov) || {};
-    const top = overview.top || overview || {};
-    const daily =
-      Array.isArray(dm?.daily) ? dm.daily :
-      Array.isArray(overview?.daily) ? overview.daily :
-      Array.isArray(dm?.items) ? dm.items :
-      Array.isArray(dm?.rows) ? dm.rows :
-      [];
+    const fromFile = await readFromPublic(m);
+    if (fromFile) return res.status(200).json(fromFile);
 
-    return res.status(200).json({ top, daily, overview, month });
+    return res.status(404).json({ error: 'NOT_FOUND', month: m });
   } catch (e) {
-    return res.status(500).json({ error: 'MONTH_ENDPOINT_FAILED', detail: String(e) });
+    return res.status(500).json({ error: 'SERVER_ERROR', message: String(e?.message || e) });
   }
 }
