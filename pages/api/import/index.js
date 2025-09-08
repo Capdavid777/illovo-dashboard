@@ -142,7 +142,7 @@ async function importYearly(rows) {
     const revenue   = revKey ? toNum(r[revKey], null) : null;
     const rate      = rateKey ? toNum(r[rateKey], null) : null;
 
-    await prisma.yearlyMetric.upsert({
+    await prisma.yearMetric.upsert({
       where: { year },
       create: { year, roomsSold, occupancy, revenue, rate },
       update: { roomsSold, occupancy, revenue, rate },
