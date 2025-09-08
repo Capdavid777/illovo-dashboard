@@ -6,10 +6,10 @@ import formidable from 'formidable';
 import { Writable } from 'stream';
 
 export const config = {
-  api: { bodyParser: false }, // formidable handles multipart/form-data
+  api: { bodyParser: false }, // we'll read raw or use formidable ourselves
 };
 
-/* ------------------------------ helpers ------------------------------ */
+/* ------------------------------ utils ------------------------------ */
 
 const FORCE_LOCAL_WRITE = process.env.FORCE_LOCAL_WRITE === '1';
 
@@ -20,15 +20,20 @@ const num = (v) => {
   const n = s ? Number(s) : 0;
   return Number.isFinite(n) ? n : 0;
 };
-const asPct = (v) => {
-  const n = num(v);
-  return n <= 1.5 ? n * 100 : n;
-};
+const asPct = (v) => (num(v) <= 1.5 ? num(v) * 100 : num(v));
 const lc = (s) => String(s || '').toLowerCase().trim();
 const hasKeys = (row, keys) =>
   keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
 
-/** Pick first available file from any field name / array shape */
+async function readRawBody(req) {
+  return await new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(Buffer.from(c)));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function pickFirstFile(files) {
   if (!files || typeof files !== 'object') return null;
   for (const val of Object.values(files)) {
@@ -42,7 +47,6 @@ function pickFirstFile(files) {
   return null;
 }
 
-/** Memory collector so we can read files even when no filepath is provided */
 function makeMemoryWriter(file) {
   const chunks = [];
   return new Writable({
@@ -75,21 +79,11 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
 
     let day = num(dayCol);
     if (!day && dateCol) {
-      try {
-        const dt = new Date(dateCol);
-        if (!Number.isNaN(dt.valueOf())) day = dt.getDate();
-      } catch {}
+      try { const dt = new Date(dateCol); if (!Number.isNaN(dt.valueOf())) day = dt.getDate(); } catch {}
     }
     if (!day) day = i + 1;
 
-    return {
-      day,
-      date: dateCol ?? null,
-      revenue: num(revCol),
-      target: num(tgtCol),
-      rate: num(rateCol),
-      occupancy: asPct(occCol),
-    };
+    return { day, date: dateCol ?? null, revenue: num(revCol), target: num(tgtCol), rate: num(rateCol), occupancy: asPct(occCol) };
   });
 
   return {
@@ -97,7 +91,7 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
       revenueToDate: num(overview.revenueToDate ?? overview.revenue ?? overview['revenue to date']),
       targetToDate:  num(overview.targetToDate ?? overview.target ?? overview['target to date']),
       averageRoomRate: num(overview.averageRoomRate ?? overview.arr ?? overview.adr ?? overview['avg rate']),
-      occupancyRate:  asPct(overview.occupancyRate ?? overview.occupancy),
+      occupancyRate: asPct(overview.occupancyRate ?? overview.occupancy),
       daily: dailyData,
       roomTypes: (roomTypes || []).map((r) => ({
         type: r.type || r.name || r['room type'] || 'Unknown',
@@ -115,7 +109,7 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
         rate: num(h.rate ?? h['avg rate']),
       })),
       lastUpdated: new Date().toISOString(),
-    }
+    },
   };
 }
 
@@ -136,62 +130,73 @@ async function uploadToAdminBucket(key, json) {
   return res.ok ? { ok: true } : { ok: false, reason: `bucket upload failed (${res.status}): ${txt.slice(0, 200)}` };
 }
 
-/* ------------------------------ API handler ------------------------------ */
+/* ------------------------------ handler ------------------------------ */
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
 
   try {
-    // Parse multipart. We explicitly set uploadDir and also capture a memory buffer.
-    const form = formidable({
-      multiples: true,
-      keepExtensions: true,
-      uploadDir: os.tmpdir(),                 // ensure files are written to disk when possible
-      fileWriteStreamHandler: makeMemoryWriter, // also keep an in-memory buffer for safety
-      maxFileSize: 25 * 1024 * 1024,
-    });
+    const ct = String(req.headers['content-type'] || '');
+    let year, month, filename, buf;
 
-    const { fields, files } = await new Promise((resolve, reject) => {
-      form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve({ fields: flds, files: fls })));
-    });
-
-    const year = Number(fields.year);
-    const month = Number(fields.month);
-
-    const fileObj =
-      (files && (files.file || files.report || files.upload)) ||
-      pickFirstFile(files);
-
-    if (!fileObj) {
-      const known = Object.keys(files || {});
-      return res.status(400).json({
-        error: 'IMPORT_FAILED',
-        reason: `No file received (expected a form field like "file"). Found file fields: ${known.length ? known.join(', ') : 'none'}`,
+    if (/multipart\/form-data/i.test(ct)) {
+      // Fallback: support multipart via formidable
+      const form = formidable({
+        multiples: true,
+        keepExtensions: true,
+        uploadDir: os.tmpdir(),
+        fileWriteStreamHandler: makeMemoryWriter, // also capture a buffer
+        maxFileSize: 25 * 1024 * 1024,
       });
+
+      const { fields, files } = await new Promise((resolve, reject) => {
+        form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve({ fields: flds, files: fls })));
+      });
+
+      year = Number(fields.year);
+      month = Number(fields.month);
+
+      const fileObj =
+        (files && (files.file || files.report || files.upload)) ||
+        pickFirstFile(files);
+
+      if (!fileObj) {
+        const known = Object.keys(files || {});
+        return res.status(400).json({
+          error: 'IMPORT_FAILED',
+          reason: `No file received. Found file fields: ${known.length ? known.join(', ') : 'none'}`,
+        });
+      }
+
+      filename = lc(fileObj.originalFilename || fileObj.newFilename || '');
+      const filepath = fileObj.filepath || fileObj.path || null;
+      const buffer = fileObj.buffer || null;
+      if (!filepath && !buffer) {
+        return res.status(400).json({
+          error: 'IMPORT_FAILED',
+          reason: 'Unable to read uploaded file path or buffer (formidable)',
+        });
+      }
+      buf = buffer || (await fs.readFile(filepath));
+    } else {
+      // Preferred path: raw binary
+      year = Number(req.query.year);
+      month = Number(req.query.month);
+      filename = lc(req.query.filename || req.headers['x-filename'] || 'upload.xlsx');
+      buf = await readRawBody(req);
+      if (!buf?.length) {
+        return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Empty request body' });
+      }
     }
 
-    const filepath = fileObj.filepath || fileObj.path || null;
-    const buffer = fileObj.buffer || null;
-
-    if (!filepath && !buffer) {
-      return res.status(400).json({
-        error: 'IMPORT_FAILED',
-        reason: 'Unable to read uploaded file path or buffer (check formidable configuration)',
-      });
-    }
-
-    if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    if (!Number.isInteger(year) || year < 2000 || year > 2100 ||
+        !Number.isInteger(month) || month < 1 || month > 12) {
       return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Invalid year/month' });
     }
 
     const key = `${year}-${String(month).padStart(2, '0')}.json`;
-    const filename = lc(fileObj.originalFilename || fileObj.newFilename || '');
-    const buf = buffer || (await fs.readFile(filepath));
 
-    let parsed = null;
-
+    let parsed;
     if (filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
       const XLSX = (await import('xlsx')).default;
       const wb = XLSX.read(buf, { type: 'buffer' });
@@ -201,7 +206,8 @@ export default async function handler(req, res) {
         const idx = names.findIndex((n) => patterns.some((p) => lc(n).includes(lc(p))));
         return idx >= 0 ? wb.Sheets[names[idx]] : null;
       };
-      const toJson = (sheet) => (sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, blankrows: false }) : []);
+      const toJson = (sheet) =>
+        sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, blankrows: false }) : [];
 
       const overview = toJson(sheetBy(['overview', 'summary', 'totals']))[0] || {};
       let daily     = toJson(sheetBy(['daily', 'days', 'daily revenue', 'calendar', 'month']));
@@ -212,12 +218,10 @@ export default async function handler(req, res) {
         for (const name of wb.SheetNames) {
           const sj = toJson(wb.Sheets[name]);
           if (sj.length && hasKeys(sj[0], ['day', 'date']) && hasKeys(sj[0], ['revenue', 'actual'])) {
-            daily = sj;
-            break;
+            daily = sj; break;
           }
         }
       }
-
       parsed = normalize({ overview, daily, roomTypes, history });
     } else if (filename.endsWith('.csv')) {
       const daily = await parseCsv(buf.toString('utf8'));
@@ -231,16 +235,20 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'No rows found in Daily sheet (or columns not recognised)' });
     }
 
-    // Try bucket first
+    // Upload to bucket if configured; otherwise write locally in dev.
     const bucket = await uploadToAdminBucket(key, parsed);
     if (bucket.ok) return res.status(200).json({ ok: true, key, rows });
 
-    // Dev/forced local write
     if (FORCE_LOCAL_WRITE || process.env.NODE_ENV !== 'production') {
       const outDir = path.join(process.cwd(), 'public', 'data');
       await fs.mkdir(outDir, { recursive: true });
       await fs.writeFile(path.join(outDir, key), JSON.stringify(parsed, null, 2));
-      return res.status(200).json({ ok: true, key, rows, note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)' });
+      return res.status(200).json({
+        ok: true,
+        key,
+        rows,
+        note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)',
+      });
     }
 
     return res.status(500).json({
