@@ -223,39 +223,50 @@ function totalsMismatch(roomTypesArr, overviewRevenue) {
 
 /* ------------------------------ normalization ------------------------------ */
 
-function normalizeOverview(raw = {}, monthKey) {
+function normalizeOverview(raw = {}) {
+  const get = (keys, fallback) => {
+    for (const k of keys) {
+      const v = raw?.[k];
+      if (v !== undefined && v !== null) return v;
+    }
+    return fallback;
+  };
+
+  // Find daily array in whatever shape came back
   let dailyArr = sniffDailyArray(raw);
   if (!Array.isArray(dailyArr)) dailyArr = [];
   const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
 
-  let revenueToDate   = num(get(raw, ['revenueToDate','revenue_to_date','revenue'], NaN));
-  let targetToDate    = num(get(raw, ['targetToDate','target_to_date','target'], NaN));
-  let averageRoomRate = num(get(raw, ['averageRoomRate','avgRoomRate','arr','adr'], NaN));
-  let occupancyRate   = get(raw, ['occupancyRate','occupancy_to_date','occupancy'], undefined);
+  // Pull summary values if present
+  let revenueToDate   = num(get(['revenueToDate','revenue_to_date','revenue'], NaN));
+  let targetToDate    = num(get(['targetToDate','target_to_date','target'], NaN));
+  let averageRoomRate = num(get(['averageRoomRate','avgRoomRate','arr','adr'], NaN));
+  let occupancyRate   = get(['occupancyRate','occupancy_to_date','occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  if (!Number.isFinite(revenueToDate) && dailyData.length) revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
-  if (!Number.isFinite(targetToDate)  && dailyData.length) targetToDate  = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
-  if (!Number.isFinite(occupancyRate) && dailyData.length) {
-    const vals = dailyData.map((d) => num(d.occupancy)).filter((n) => Number.isFinite(n));
-    occupancyRate = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  // If the summary row is blank/0 but we have daily data, fall back to totals/averages
+  const hasDaily = dailyData.length > 0;
+  const hasAnyMoney = hasDaily && dailyData.some(d => num(d.revenue) > 0 || num(d.target) > 0);
+
+  if ((!Number.isFinite(revenueToDate) || revenueToDate === 0) && hasAnyMoney) {
+    revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
+  }
+  if ((!Number.isFinite(targetToDate) || targetToDate === 0) && hasAnyMoney) {
+    targetToDate  = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
+  }
+  if ((!Number.isFinite(occupancyRate) || occupancyRate === 0) && hasDaily) {
+    const vals = dailyData.map(d => num(d.occupancy)).filter(n => Number.isFinite(n));
+    occupancyRate = vals.length ? (vals.reduce((a,b)=>a+b,0) / vals.length) : 0;
   }
   if (!Number.isFinite(averageRoomRate)) averageRoomRate = 0;
 
   dailyData.sort((a, b) => a.day - b.day);
 
-  const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) - (Number.isFinite(revenueToDate) ? revenueToDate : 0);
-  const lastUpdated = get(raw, ['lastUpdated','updatedAt','last_updated'], null);
-
-  // Month-aware extraction
-  let roomTypes = pickArrayForMonth(raw, monthKey, ['roomTypes','roomTypesData']);
-  if (roomTypes && totalsMismatch(roomTypes, revenueToDate)) roomTypes = null;
-
-  let history = pickArrayForMonth(raw, monthKey, ['history','yearlyData']);
-  // If not month-shaped, accept plain array (e.g., pure per-year rows)
-  if (!history && Array.isArray(get(raw, ['history','yearlyData'], null))) {
-    history = get(raw, ['history','yearlyData'], null);
-  }
+  const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) -
+                         (Number.isFinite(revenueToDate) ? revenueToDate : 0);
+  const lastUpdated = get(['lastUpdated','updatedAt','last_updated'], null);
+  const roomTypesRaw = get(['roomTypes','roomTypesData'], null);
+  const historyRaw   = get(['history','yearlyData'], null);
 
   return {
     revenueToDate: Number.isFinite(revenueToDate) ? revenueToDate : 0,
@@ -265,11 +276,10 @@ function normalizeOverview(raw = {}, monthKey) {
     targetVariance,
     dailyData,
     lastUpdated,
-    roomTypes: Array.isArray(roomTypes) ? roomTypes : null,
-    history: Array.isArray(history) ? history : null,
+    roomTypes: Array.isArray(roomTypesRaw) ? roomTypesRaw : null,
+    history: Array.isArray(historyRaw) ? historyRaw : null,
   };
 }
-
 /* ------------------------------ palettes ------------------------------ */
 
 const ROOM_PALETTES = {
