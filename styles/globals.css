@@ -14,20 +14,19 @@ html, body {
 
 /* Links */
 a {
-  @apply underline transition-colors;
-  color: #CBA135;
+  @apply text-gold underline-offset-4;
+  text-underline-position: from-font;
 }
 a:hover {
-  color: #e6c767; /* lighter gold on hover */
+  text-decoration: underline;
 }
 
 /* Headings */
-h1, h2, h3, h4, h5, h6 {
-  @apply font-semibold tracking-tight;
-  color: #ffffff;
+h1, h2, h3, h4 {
+  @apply font-semibold text-white;
 }
 
-/* Buttons */
+/* Buttons (generic) */
 button {
   @apply px-4 py-2 rounded-lg font-medium transition-colors;
   background-color: #CBA135;
@@ -45,7 +44,7 @@ input, textarea, select {
   @apply rounded-lg border border-neutral-700 bg-neutral-800 text-white px-3 py-2;
 }
 input:focus, textarea:focus, select:focus {
-  @apply outline-none ring-2 ring-[#CBA135];
+  @apply outline-none ring-2 ring-neutral-600;
 }
 
 /* Tables */
