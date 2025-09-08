@@ -22,11 +22,25 @@ const asPct = (v) => {
   const n = num(v);
   return n <= 1.5 ? n * 100 : n;
 };
-
 const lc = (s) => String(s || '').toLowerCase().trim();
-
 const hasKeys = (row, keys) =>
   keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
+
+/** Pick first available file from any field name / array shape */
+function pickFirstFile(files) {
+  if (!files || typeof files !== 'object') return null;
+  for (const val of Object.values(files)) {
+    if (!val) continue;
+    if (Array.isArray(val)) {
+      for (const f of val) {
+        if (f && (f.filepath || f.path || f.originalFilename)) return f;
+      }
+    } else if (typeof val === 'object') {
+      if (val.filepath || val.path || val.originalFilename) return val;
+    }
+  }
+  return null;
+}
 
 async function parseCsv(text) {
   const sep = text.includes(';') && !text.includes(',') ? ';' : ',';
@@ -54,7 +68,6 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     const occCol = d.occupancy ?? d.Occupancy ?? d.occ ?? d['occ%'] ?? d['occupancy rate'];
 
     let day = num(dayCol);
-    // derive day from date if needed
     if (!day && dateCol) {
       try {
         const dt = new Date(dateCol);
@@ -73,7 +86,7 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     };
   });
 
-  const out = {
+  return {
     overview: {
       revenueToDate: num(overview.revenueToDate ?? overview.revenue ?? overview['revenue to date']),
       targetToDate: num(overview.targetToDate ?? overview.target ?? overview['target to date']),
@@ -98,7 +111,6 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
       lastUpdated: new Date().toISOString(),
     },
   };
-  return out;
 }
 
 async function uploadToAdminBucket(key, json) {
@@ -126,11 +138,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Parse multipart
     const form = formidable({
-      multiples: false,
+      multiples: true,              // tolerate array or single
       keepExtensions: true,
-      maxFileSize: 25 * 1024 * 1024, // 25MB
+      maxFileSize: 25 * 1024 * 1024,
     });
 
     const { fields, files } = await new Promise((resolve, reject) => {
@@ -139,20 +150,33 @@ export default async function handler(req, res) {
 
     const year = Number(fields.year);
     const month = Number(fields.month);
-    const file = files.file || files.report || files.upload;
 
-    if (!file || !file.filepath) {
-      return res
-        .status(400)
-        .json({ error: 'IMPORT_FAILED', reason: 'No file received (expected form field name "file")' });
+    const fileObj =
+      (files && (files.file || files.report || files.upload)) || // common names
+      pickFirstFile(files);                                      // any other key/shape
+
+    if (!fileObj) {
+      const known = Object.keys(files || {});
+      return res.status(400).json({
+        error: 'IMPORT_FAILED',
+        reason:
+          `No file received (expected form field like "file"). ` +
+          `Found file fields: ${known.length ? known.join(', ') : 'none'}`,
+      });
     }
+
+    const filepath = fileObj.filepath || fileObj.path;
+    if (!filepath) {
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Unable to read uploaded file path' });
+    }
+
     if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
       return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Invalid year/month' });
     }
 
     const key = `${year}-${String(month).padStart(2, '0')}.json`;
-    const filename = lc(file.originalFilename || file.newFilename || '');
-    const buf = await fs.readFile(file.filepath);
+    const filename = lc(fileObj.originalFilename || fileObj.newFilename || '');
+    const buf = await fs.readFile(filepath);
 
     let parsed = null;
 
@@ -160,7 +184,6 @@ export default async function handler(req, res) {
       const XLSX = (await import('xlsx')).default;
       const wb = XLSX.read(buf, { type: 'buffer' });
 
-      // Flexible sheet picking
       const sheetBy = (patterns) => {
         const names = wb.SheetNames || [];
         const idx = names.findIndex((n) => patterns.some((p) => lc(n).includes(lc(p))));
@@ -169,15 +192,11 @@ export default async function handler(req, res) {
       const toJson = (sheet) =>
         sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, blankrows: false }) : [];
 
-      // Try common variants
-      const overview =
-        toJson(sheetBy(['overview', 'summary', 'totals']))[0] ||
-        {}; // allow single-row overview; empty is OK
+      const overview = toJson(sheetBy(['overview', 'summary', 'totals']))[0] || {};
       let daily = toJson(sheetBy(['daily', 'days', 'daily revenue', 'calendar', 'month']));
       let roomTypes = toJson(sheetBy(['roomtypes', 'room types', 'types', 'rooms']));
       let history = toJson(sheetBy(['history', 'annual', 'yoy', 'yearly']));
 
-      // Heuristic fallback: if we didn't find daily, pick the sheet that clearly has day/revenue/target columns
       if (!daily.length) {
         for (const name of wb.SheetNames) {
           const sj = toJson(wb.Sheets[name]);
@@ -211,25 +230,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, key, rows });
     }
 
-    // 2) Local write (dev) or explicitly forced
+    // 2) Local write (dev/forced)
     if (FORCE_LOCAL_WRITE || process.env.NODE_ENV !== 'production') {
       const outDir = path.join(process.cwd(), 'public', 'data');
       await fs.mkdir(outDir, { recursive: true });
       await fs.writeFile(path.join(outDir, key), JSON.stringify(parsed, null, 2));
-      return res
-        .status(200)
-        .json({ ok: true, key, rows, note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)' });
+      return res.status(200).json({
+        ok: true,
+        key,
+        rows,
+        note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)',
+      });
     }
 
     // 3) Nothing configured
-    return res
-      .status(500)
-      .json({
-        error: 'IMPORT_FAILED',
-        reason: bucket.reason || 'No storage configured (set ADMIN_BUCKET_PUT_URL or use FORCE_LOCAL_WRITE=1 in dev)',
-      });
+    return res.status(500).json({
+      error: 'IMPORT_FAILED',
+      reason: bucket.reason || 'No storage configured (set ADMIN_BUCKET_PUT_URL or use FORCE_LOCAL_WRITE=1 in dev)',
+    });
   } catch (err) {
-    // Always return a human-friendly reason
     return res.status(500).json({ error: 'IMPORT_FAILED', reason: String(err?.message || err) });
   }
 }
