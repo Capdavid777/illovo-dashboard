@@ -51,3 +51,4 @@ logs/
 *.swo
 *.bak
 *.tmp
+.vercel
