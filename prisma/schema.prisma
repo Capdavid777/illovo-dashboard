@@ -13,14 +13,13 @@ datasource db {
 model DailyMetric {
   id        Int      @id @default(autoincrement())
   date      DateTime @unique
-  revenue   Int?            // keep as Int; set to BigInt? if needed (see alt below)
+  revenue   Int?
   target    Int?
-  occupancy Float?          // store 46.0 for 46%
+  occupancy Float?      // store 46.0 for 46%
   arr       Int?
   notes     String?  @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  // NOTE: @unique(date) already creates an index; extra @@index([date]) was redundant
 }
 
 model RoomTypeMetric {
@@ -30,9 +29,9 @@ model RoomTypeMetric {
   rooms     Int?
   available Int?
   sold      Int?
-  revenue   Int?            // consider BigInt? if storing cents/large totals
-  rate      Int?            // keep integer ADR; use Float? if you need decimals
-  occupancy Float?          // percent 0..100
+  revenue   Int?
+  rate      Int?
+  occupancy Float?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -42,27 +41,22 @@ model RoomTypeMetric {
 
 model YearMetric {
   id        Int   @id @default(autoincrement())
-  year      Int   @unique          // e.g. 2022, 2023, 2024...
+  year      Int   @unique
   roomsSold Int   @default(0)
-  occupancy Float @default(0)      // percent 0..100
-  revenue   Int   @default(0)      // consider BigInt if totals can exceed ~2.1B
-  rate      Int   @default(0)      // ADR (use Float if fractional needed)
+  occupancy Float @default(0)   // percent 0..100
+  revenue   Int   @default(0)   // consider BigInt if totals can exceed ~2.1B
+  rate      Int   @default(0)   // ADR
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 /*
-───────────────────────────────────────────────────────────────────────────────
 ALT (optional): use BigInt for revenue if values can exceed 2,147,483,647.
-Uncomment these lines *and* run a migration to alter column types in the DB.
+If you switch to BigInt, update both the schema and the DB via a migration,
+and remember to handle BigInt in JSON serialization.
 
-  revenue   BigInt?   // DailyMetric
-  revenue   BigInt?   // RoomTypeMetric
-  revenue   BigInt    @default(0) // YearMetric
-
-Notes:
-- Prisma returns PostgreSQL BIGINT as JavaScript BigInt. Be mindful when:
-  - Doing JSON serialization (convert to string or number first).
-  - Mixing with Number; don’t add/multiply BigInt with Number directly.
+  // DailyMetric.revenue   BigInt?
+  // RoomTypeMetric.revenue BigInt?
+  // YearMetric.revenue    BigInt @default(0)
 */
