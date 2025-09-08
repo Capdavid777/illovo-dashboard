@@ -1,203 +1,127 @@
-import React, { useState } from 'react';
+// pages/admin/import.js
+import { useState } from 'react';
 import Link from 'next/link';
 
 export default function AdminImportPage() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1); // 1..12
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1); // 1..12
   const [file, setFile] = useState(null);
-  const [msg, setMsg] = useState('');
-  const [isError, setIsError] = useState(false);
-  const [isBusy, setIsBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [okMsg, setOkMsg] = useState('');
+  const [errMsg, setErrMsg] = useState('');
+  const [debug, setDebug] = useState(null);
 
-  const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
-
-  const onSubmit = async (e) => {
+  async function onSubmit(e) {
     e.preventDefault();
-    setMsg('');
-    setIsError(false);
-
-    if (!file) {
-      setMsg('Please choose a .xlsx or .csv file.');
-      setIsError(true);
-      return;
-    }
+    setBusy(true);
+    setOkMsg('');
+    setErrMsg('');
+    setDebug(null);
 
     try {
-      setIsBusy(true);
       const fd = new FormData();
-      fd.append('file', file); // must be 'file'
-      fd.append('year', String(year));
-      fd.append('month', String(month));
+      fd.set('year', String(year));
+      fd.set('month', String(month));
+      if (file) fd.set('file', file); // IMPORTANT: name="file" to match API
 
-      const r = await fetch('/api/import', { method: 'POST', body: fd });
+      const res = await fetch('/api/import', { method: 'POST', body: fd });
+      let data = {};
+      try { data = await res.json(); } catch {}
+      setDebug(data);
 
-      let j = {};
-      try { j = await r.json(); } catch { /* ignore parse errors */ }
-
-      if (!r.ok || j.ok === false) {
-        setIsError(true);
-        setMsg(`Error: ${j.error || 'UPLOAD_FAILED'}`);
-        return;
+      if (!res.ok) {
+        // Show the precise reason the API returns
+        setErrMsg(data?.reason || data?.error || `Upload failed (HTTP ${res.status})`);
+      } else {
+        setOkMsg(`Imported ${data.rows} rows into ${data.key}${data.note ? ` · ${data.note}` : ''}`);
       }
-
-      setMsg(`Imported ${j.imported || 0} day(s). Go back to Admin to verify.`);
-      setIsError(false);
-      setFile(null); // optional: clear file input
-      // Optionally also e.target.reset();
     } catch (err) {
-      console.error(err);
-      setIsError(true);
-      setMsg('Error: upload failed');
+      setErrMsg(String(err?.message || err));
     } finally {
-      setIsBusy(false);
+      setBusy(false);
     }
-  };
+  }
 
   return (
-    <main>
-      <header className="topbar">
-        <h1>Admin · Import Report</h1>
-        <Link href="/admin" className="link">Back to Admin</Link>
-      </header>
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Admin · Import Report</h1>
+        <Link href="/admin" className="text-blue-500 hover:underline">Back to Admin</Link>
+      </div>
 
-      <section className="form">
-        <form onSubmit={onSubmit}>
-          <div className="row">
-            <div>
-              <label htmlFor="year">Year</label>
-              <input
-                id="year"
-                type="number"
-                value={year}
-                required
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setYear(Number.isFinite(val) ? val : now.getFullYear());
-                }}
-              />
-            </div>
+      <form onSubmit={onSubmit} encType="multipart/form-data" className="space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className="block">
+            <span className="block text-sm text-gray-500">Year</span>
+            <input
+              type="number"
+              min={2000}
+              max={2100}
+              required
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="mt-1 w-full rounded border border-gray-300 bg-white/5 p-2"
+            />
+          </label>
 
-            <div>
-              <label htmlFor="month">Month (1–12)</label>
-              <input
-                id="month"
-                type="number"
-                min={1}
-                max={12}
-                value={month}
-                required
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setMonth(Number.isFinite(val) ? clamp(val, 1, 12) : 1);
-                }}
-              />
-            </div>
+          <label className="block">
+            <span className="block text-sm text-gray-500">Month (1–12)</span>
+            <input
+              type="number"
+              min={1}
+              max={12}
+              required
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              className="mt-1 w-full rounded border border-gray-300 bg-white/5 p-2"
+            />
+          </label>
+        </div>
 
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label htmlFor="file">Report file (.xlsx or .csv)</label>
-              <input
-                id="file"
-                name="file" // must be 'file'
-                type="file"
-                accept=".xlsx,.csv"
-                required
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            </div>
-          </div>
+        <label className="block">
+          <span className="block text-sm text-gray-500">Report file (.xlsx or .csv)</span>
+          <input
+            type="file"
+            name="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="mt-1 block w-full text-sm"
+            required
+          />
+        </label>
 
-          <div className="actions">
-            <button type="submit" disabled={isBusy} aria-busy={isBusy}>
-              {isBusy ? 'Uploading…' : 'Upload & Import'}
-            </button>
-            {msg && (
-              <span className={isError ? 'error' : 'success'}>{msg}</span>
-            )}
-          </div>
-        </form>
-      </section>
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={busy}
+            className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800 disabled:opacity-60"
+          >
+            {busy ? 'Uploading…' : 'Upload & Import'}
+          </button>
+          {okMsg && <span className="text-green-600 text-sm">{okMsg}</span>}
+          {errMsg && <span className="text-red-600 text-sm">Error: {errMsg}</span>}
+        </div>
+      </form>
 
-      <Styles />
-    </main>
-  );
-}
+      {debug && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-sm text-gray-500">Response details</summary>
+          <pre className="mt-2 max-h-80 overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-xs">
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
+      )}
 
-function Styles() {
-  return (
-    <style jsx global>{`
-      :root {
-        --bg: #0b0c10;
-        --card: #111317;
-        --line: #1f2937;
-        --text: #e5e7eb;
-        --muted: #9ca3af;
-        --link: #93c5fd;
-        --accent: #6366f1;
-        --ok: #10b981;
-        --err: #ef4444;
-      }
-      html, body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
-          Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji',
-          'Segoe UI Emoji';
-      }
-      main {
-        max-width: 980px;
-        margin: 40px auto;
-        padding: 24px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: var(--card);
-      }
-      .topbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 16px;
-      }
-      h1 { font-size: 22px; margin: 0; }
-      .link { color: var(--link); text-decoration: underline; }
-      .form { margin-top: 8px; }
-      .row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-      }
-      .row > div { display: flex; flex-direction: column; }
-      label { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
-      input[type='text'],
-      input[type='number'],
-      input[type='date'],
-      input[type='file'],
-      textarea {
-        background: #0f1115;
-        border: 1px solid var(--line);
-        color: var(--text);
-        border-radius: 8px;
-        padding: 10px 12px;
-        outline: none;
-      }
-      .actions { margin-top: 12px; }
-      button {
-        background: var(--accent);
-        color: #fff;
-        border: 0;
-        padding: 10px 14px;
-        border-radius: 8px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button[disabled] { opacity: 0.75; cursor: default; }
-      button:hover:not([disabled]) { filter: brightness(1.07); }
-      .error { margin-left: 12px; color: var(--err); font-size: 13px; }
-      .success { margin-left: 12px; color: var(--ok); font-size: 13px; }
-      @media (max-width: 640px) {
-        main { margin: 12px; padding: 16px; }
-        .row { grid-template-columns: 1fr; }
-      }
-    `}</style>
+      <div className="text-xs text-gray-500">
+        <p><b>Template expectations</b> (sheet names are case-insensitive):</p>
+        <ul className="list-disc ml-5">
+          <li><code>Overview</code> – revenueToDate, targetToDate, averageRoomRate/ARR/ADR, occupancy</li>
+          <li><code>Daily</code> – columns: day/date, revenue/actual, target/budget, rate/arr/adr, occupancy/occ</li>
+          <li><code>RoomTypes</code> – type, available, sold, revenue, rate/arr/adr, occupancy</li>
+          <li><code>History</code> – year, roomsSold, occupancy, revenue, rate</li>
+        </ul>
+      </div>
+    </div>
   );
 }
