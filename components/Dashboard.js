@@ -67,9 +67,9 @@ function useMonthParam() {
   return { month, setMonth };
 }
 
+/* ------------------------------ Month switcher (visible text) ------------------------------ */
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
-
   const prev = () => {
     const nk = toKey(new Date(d.getFullYear(), d.getMonth() - 1, 1));
     if (!minKey || nk >= minKey) onChange(nk);
@@ -79,33 +79,22 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     if (!maxKey || nk <= maxKey) onChange(nk);
   };
 
-  // Build month options deterministically
   const options = (() => {
     const out = [];
     const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
     const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
     const cur = new Date(start);
     while (cur <= end) {
-      out.push(toKey(cur));
-      cur.setMonth(cur.getMonth() + 1);
+      out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1);
     }
     return out.reverse();
   })();
 
   return (
     <div className="flex items-center gap-2">
-      <button onClick={prev} className="px-2 py-1 border rounded" type="button" aria-label="Previous month">
-        &lt;
-      </button>
-
-      {/* Force dark text so it’s visible on the light header */}
+      <button onClick={prev} className="px-2 py-1 border rounded" type="button" aria-label="Previous month">&lt;</button>
       <div className="font-medium text-neutral-900">{fmtMonth(d)}</div>
-
-      <button onClick={next} className="px-2 py-1 border rounded" type="button" aria-label="Next month">
-        &gt;
-      </button>
-
-      {/* Force readable select: white bg + dark text (inline style beats global CSS) */}
+      <button onClick={next} className="px-2 py-1 border rounded" type="button" aria-label="Next month">&gt;</button>
       <select
         value={monthKey}
         onChange={(e) => onChange(e.target.value)}
@@ -113,14 +102,13 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
         style={{ color: '#111827' }}
         aria-label="Jump to month"
       >
-        {options.map((k) => (
-          <option key={k} value={k}>{fmtMonth(fromKey(k))}</option>
-        ))}
+        {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
       </select>
     </div>
   );
 }
-/* ------------------------------ deep helpers/* ------------------------------ deep helpers for normalization ------------------------------ */
+
+/* ------------------------------ deep helpers for normalization ------------------------------ */
 
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
@@ -184,19 +172,66 @@ function mapDailyRow(d, i) {
   };
 }
 
+/* ------------------------------ month-aware selectors ------------------------------ */
+
+const get = (obj, keys, fallback) => { for (const k of keys) if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k]; return fallback; };
+
+function pickArrayForMonth(raw, monthKey, fieldNames) {
+  // Accept: direct array, { [monthKey]: [] }, or array with per-item 'month'/'period'/'monthKey'/'date'
+  const rawField = get(raw, fieldNames, null);
+  if (!rawField) return null;
+
+  // { [monthKey]: [...] }
+  if (!Array.isArray(rawField) && typeof rawField === 'object') {
+    if (Array.isArray(rawField[monthKey])) return rawField[monthKey];
+  }
+
+  // direct array (maybe carries a month on the items)
+  if (Array.isArray(rawField)) {
+    const first = rawField[0];
+    if (first && typeof first === 'object') {
+      const monthProp = ['month', 'period', 'monthKey'].find((p) => p in first);
+      if (monthProp) {
+        const filtered = rawField.filter((r) => String(r[monthProp]) === monthKey);
+        if (filtered.length) return filtered;
+      }
+      // Allow date-based filtering if items have 'date'
+      if ('date' in first) {
+        const m = monthKey.split('-').join('-');
+        const filtered = rawField.filter((r) => {
+          const d = r.date ? new Date(r.date) : null;
+          return d && toKey(d) === monthKey;
+        });
+        if (filtered.length) return filtered;
+      }
+    }
+    // Otherwise we assume the array already belongs to the selected month
+    return rawField;
+  }
+
+  return null;
+}
+
+/* If room-types totals diverge too far from overview revenue, treat them as stale and ignore. */
+function totalsMismatch(roomTypesArr, overviewRevenue) {
+  if (!Array.isArray(roomTypesArr) || roomTypesArr.length === 0) return true;
+  const sum = roomTypesArr.reduce((a, r) => a + num(r.revenue), 0);
+  const A = Math.max(1, Math.abs(num(overviewRevenue)));
+  const gap = Math.abs(sum - num(overviewRevenue));
+  return gap / A > 0.2; // >20% off looks like a different month
+}
+
 /* ------------------------------ normalization ------------------------------ */
 
-function normalizeOverview(raw = {}) {
-  const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
-
+function normalizeOverview(raw = {}, monthKey) {
   let dailyArr = sniffDailyArray(raw);
   if (!Array.isArray(dailyArr)) dailyArr = [];
   const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
 
-  let revenueToDate   = num(get(['revenueToDate','revenue_to_date','revenue'], NaN));
-  let targetToDate    = num(get(['targetToDate','target_to_date','target'], NaN));
-  let averageRoomRate = num(get(['averageRoomRate','avgRoomRate','arr','adr'], NaN));
-  let occupancyRate   = get(['occupancyRate','occupancy_to_date','occupancy'], undefined);
+  let revenueToDate   = num(get(raw, ['revenueToDate','revenue_to_date','revenue'], NaN));
+  let targetToDate    = num(get(raw, ['targetToDate','target_to_date','target'], NaN));
+  let averageRoomRate = num(get(raw, ['averageRoomRate','avgRoomRate','arr','adr'], NaN));
+  let occupancyRate   = get(raw, ['occupancyRate','occupancy_to_date','occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
   if (!Number.isFinite(revenueToDate) && dailyData.length) revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
@@ -210,9 +245,17 @@ function normalizeOverview(raw = {}) {
   dailyData.sort((a, b) => a.day - b.day);
 
   const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) - (Number.isFinite(revenueToDate) ? revenueToDate : 0);
-  const lastUpdated = get(['lastUpdated','updatedAt','last_updated'], null);
-  const roomTypesRaw = get(['roomTypes','roomTypesData'], null);
-  const historyRaw   = get(['history','yearlyData'], null);
+  const lastUpdated = get(raw, ['lastUpdated','updatedAt','last_updated'], null);
+
+  // Month-aware extraction
+  let roomTypes = pickArrayForMonth(raw, monthKey, ['roomTypes','roomTypesData']);
+  if (roomTypes && totalsMismatch(roomTypes, revenueToDate)) roomTypes = null;
+
+  let history = pickArrayForMonth(raw, monthKey, ['history','yearlyData']);
+  // If not month-shaped, accept plain array (e.g., pure per-year rows)
+  if (!history && Array.isArray(get(raw, ['history','yearlyData'], null))) {
+    history = get(raw, ['history','yearlyData'], null);
+  }
 
   return {
     revenueToDate: Number.isFinite(revenueToDate) ? revenueToDate : 0,
@@ -222,8 +265,8 @@ function normalizeOverview(raw = {}) {
     targetVariance,
     dailyData,
     lastUpdated,
-    roomTypes: Array.isArray(roomTypesRaw) ? roomTypesRaw : null,
-    history: Array.isArray(historyRaw) ? historyRaw : null,
+    roomTypes: Array.isArray(roomTypes) ? roomTypes : null,
+    history: Array.isArray(history) ? history : null,
   };
 }
 
@@ -296,7 +339,7 @@ const Dashboard = ({ overview }) => {
       try {
         const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
-          if (alive) { setMonthOverview(r1.json?.overview || r1.json || null); setLoading(false); }
+          if (alive) { setMonthOverview(r1.json?.overview ? r1.json.overview : r1.json); setLoading(false); }
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
         } else {
@@ -341,7 +384,7 @@ const Dashboard = ({ overview }) => {
   }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
-  const ov = useMemo(() => normalizeOverview(rawForNormalize), [rawForNormalize]);
+  const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
@@ -442,28 +485,6 @@ const Dashboard = ({ overview }) => {
         <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
         <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
-      </div>
-
-      <div className="bg-white p-6 rounded-lg shadow-lg">
-        <h3 className="text-lg font-semibold mb-4">Progress to Breakeven</h3>
-        <div className="space-y-2 mb-4">
-          <div className="flex justify-between">
-            <span className="text-sm font-medium text-gray-700">Revenue Progress</span>
-            <span className="text-sm text-gray-500">{revenueProgressPct}% of target</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${revenueProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${revenueProgressPct}%` }} />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <div className="flex justify-between">
-            <span className="text-sm font-medium text-gray-700">Occupancy Progress</span>
-            <span className="text-sm text-gray-500">{occupancyProgressPct}% of target</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div className={`h-3 rounded-full ${occupancyProgressPct >= 100 ? 'bg-[#CBA135]' : 'bg-black'}`} style={{ width: `${occupancyProgressPct}%` }} />
-          </div>
-        </div>
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
