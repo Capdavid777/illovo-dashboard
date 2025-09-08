@@ -20,18 +20,26 @@ export default function AdminImportPage() {
     setDebug(null);
 
     try {
-      const fd = new FormData();
-      fd.set('year', String(year));
-      fd.set('month', String(month));
-      if (file) fd.set('file', file); // IMPORTANT: name="file" to match API
+      if (!file) throw new Error('Please choose a file');
 
-      const res = await fetch('/api/import', { method: 'POST', body: fd });
+      // Send RAW BINARY to the API (no multipart parser headaches)
+      const buf = await file.arrayBuffer();
+      const res = await fetch(
+        `/api/import?year=${encodeURIComponent(year)}&month=${encodeURIComponent(
+          month
+        )}&filename=${encodeURIComponent(file.name)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/octet-stream' },
+          body: buf,
+        }
+      );
+
       let data = {};
       try { data = await res.json(); } catch {}
-      setDebug(data);
 
+      setDebug(data);
       if (!res.ok) {
-        // Show the precise reason the API returns
         setErrMsg(data?.reason || data?.error || `Upload failed (HTTP ${res.status})`);
       } else {
         setOkMsg(`Imported ${data.rows} rows into ${data.key}${data.note ? ` · ${data.note}` : ''}`);
@@ -50,7 +58,7 @@ export default function AdminImportPage() {
         <Link href="/admin" className="text-blue-500 hover:underline">Back to Admin</Link>
       </div>
 
-      <form onSubmit={onSubmit} encType="multipart/form-data" className="space-y-5">
+      <form onSubmit={onSubmit} className="space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
             <span className="block text-sm text-gray-500">Year</span>
@@ -80,10 +88,9 @@ export default function AdminImportPage() {
         </div>
 
         <label className="block">
-          <span className="block text-sm text-gray-500">Report file (.xlsx or .csv)</span>
+          <span className="block text-sm text-gray-500">Report file (.xlsx / .xls / .csv)</span>
           <input
             type="file"
-            name="file"
             accept=".xlsx,.xls,.csv"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="mt-1 block w-full text-sm"
@@ -117,7 +124,7 @@ export default function AdminImportPage() {
         <p><b>Template expectations</b> (sheet names are case-insensitive):</p>
         <ul className="list-disc ml-5">
           <li><code>Overview</code> – revenueToDate, targetToDate, averageRoomRate/ARR/ADR, occupancy</li>
-          <li><code>Daily</code> – columns: day/date, revenue/actual, target/budget, rate/arr/adr, occupancy/occ</li>
+          <li><code>Daily</code> – day/date, revenue/actual, target/budget, rate/arr/adr, occupancy/occ</li>
           <li><code>RoomTypes</code> – type, available, sold, revenue, rate/arr/adr, occupancy</li>
           <li><code>History</code> – year, roomsSold, occupancy, revenue, rate</li>
         </ul>
