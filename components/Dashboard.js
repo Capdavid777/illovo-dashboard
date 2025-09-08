@@ -79,7 +79,7 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     const cur = new Date(start);
     while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
     return out.reverse();
-  })();
+  })(); })();
 
   return (
     <div className="flex items-center gap-2">
@@ -229,11 +229,11 @@ const Dashboard = ({ overview }) => {
   const debugOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
-  })();
+  })(); })();
   const inspectOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
-  })();
+  })(); })();
 
   useEffect(() => {
     let alive = true;
@@ -267,9 +267,7 @@ const Dashboard = ({ overview }) => {
       return { ok: false, status: r.status, jsonCt: isJson(r) };
     }
 
-    (async () => {
-      try {
-        const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
+    (()=>{ const capturedMonth = month; return (()=>{ const capturedMonth2 = month; return (async () => { try { const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
           if (alive) { setMonthOverview(r1.json?.overview || r1.json || null); setLoading(false); }
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
@@ -284,7 +282,7 @@ const Dashboard = ({ overview }) => {
           tryJson(`/api/overview?month=${month}`, 'admin-db/overview'),
           tryJson(`/api/daily-metrics?month=${month}`, 'admin-db/daily'),
         ]);
-        if (ov.ok || dm.ok) {
+        if ((ov.ok || dm.ok) && capturedMonth2 === month) {
           const ovJson = ov.ok ? ov.json : null;
           const dmJson = dm.ok ? dm.json : null;
           const daily =
@@ -310,7 +308,7 @@ const Dashboard = ({ overview }) => {
       } catch (e) { record({ source: 'static (/public/data)', error: String(e) }); }
 
       if (alive) { setMonthOverview(null); setLoading(false); }
-    })();
+    })(); })();
 
     return () => { alive = false; };
   }, [month, inspectOn]);
