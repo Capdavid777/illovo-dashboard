@@ -1,7 +1,9 @@
 // pages/api/import/index.js
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import formidable from 'formidable';
+import { Writable } from 'stream';
 
 export const config = {
   api: { bodyParser: false }, // formidable handles multipart/form-data
@@ -32,14 +34,21 @@ function pickFirstFile(files) {
   for (const val of Object.values(files)) {
     if (!val) continue;
     if (Array.isArray(val)) {
-      for (const f of val) {
-        if (f && (f.filepath || f.path || f.originalFilename)) return f;
-      }
+      for (const f of val) if (f && (f.filepath || f.path || f.buffer || f.originalFilename)) return f;
     } else if (typeof val === 'object') {
-      if (val.filepath || val.path || val.originalFilename) return val;
+      if (val.filepath || val.path || val.buffer || val.originalFilename) return val;
     }
   }
   return null;
+}
+
+/** Memory collector so we can read files even when no filepath is provided */
+function makeMemoryWriter(file) {
+  const chunks = [];
+  return new Writable({
+    write(chunk, _enc, cb) { chunks.push(chunk); cb(); },
+    final(cb) { file.buffer = Buffer.concat(chunks); cb(); },
+  });
 }
 
 async function parseCsv(text) {
@@ -47,22 +56,19 @@ async function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   if (!lines.length) return [];
   const headers = lines.shift().split(sep).map((s) => s.trim());
-  return lines
-    .filter(Boolean)
-    .map((row) => {
-      const vals = row.split(sep).map((s) => s.trim());
-      const o = {};
-      headers.forEach((h, i) => (o[h] = vals[i]));
-      return o;
-    });
+  return lines.filter(Boolean).map((row) => {
+    const vals = row.split(sep).map((s) => s.trim());
+    const o = {};
+    headers.forEach((h, i) => (o[h] = vals[i]));
+    return o;
+  });
 }
 
 function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) {
   const dailyData = daily.map((d, i) => {
     const dayCol = d.day ?? d.Day ?? d.d ?? d.D;
     const dateCol = d.date ?? d.Date ?? d.dt ?? d.Dt ?? d['day date'];
-    const revCol =
-      d.revenue ?? d.Revenue ?? d.actual ?? d['actual revenue'] ?? d['accommodation revenue'] ?? d['total revenue'];
+    const revCol = d.revenue ?? d.Revenue ?? d.actual ?? d['actual revenue'] ?? d['accommodation revenue'] ?? d['total revenue'];
     const tgtCol = d.target ?? d.Target ?? d.budget ?? d.Budget ?? d['daily target'];
     const rateCol = d.rate ?? d.Rate ?? d.arr ?? d.ARR ?? d.adr ?? d.ADR ?? d['average rate'];
     const occCol = d.occupancy ?? d.Occupancy ?? d.occ ?? d['occ%'] ?? d['occupancy rate'];
@@ -89,9 +95,9 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
   return {
     overview: {
       revenueToDate: num(overview.revenueToDate ?? overview.revenue ?? overview['revenue to date']),
-      targetToDate: num(overview.targetToDate ?? overview.target ?? overview['target to date']),
+      targetToDate:  num(overview.targetToDate ?? overview.target ?? overview['target to date']),
       averageRoomRate: num(overview.averageRoomRate ?? overview.arr ?? overview.adr ?? overview['avg rate']),
-      occupancyRate: asPct(overview.occupancyRate ?? overview.occupancy),
+      occupancyRate:  asPct(overview.occupancyRate ?? overview.occupancy),
       daily: dailyData,
       roomTypes: (roomTypes || []).map((r) => ({
         type: r.type || r.name || r['room type'] || 'Unknown',
@@ -109,7 +115,7 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
         rate: num(h.rate ?? h['avg rate']),
       })),
       lastUpdated: new Date().toISOString(),
-    },
+    }
   };
 }
 
@@ -138,9 +144,12 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Parse multipart. We explicitly set uploadDir and also capture a memory buffer.
     const form = formidable({
-      multiples: true,              // tolerate array or single
+      multiples: true,
       keepExtensions: true,
+      uploadDir: os.tmpdir(),                 // ensure files are written to disk when possible
+      fileWriteStreamHandler: makeMemoryWriter, // also keep an in-memory buffer for safety
       maxFileSize: 25 * 1024 * 1024,
     });
 
@@ -152,22 +161,25 @@ export default async function handler(req, res) {
     const month = Number(fields.month);
 
     const fileObj =
-      (files && (files.file || files.report || files.upload)) || // common names
-      pickFirstFile(files);                                      // any other key/shape
+      (files && (files.file || files.report || files.upload)) ||
+      pickFirstFile(files);
 
     if (!fileObj) {
       const known = Object.keys(files || {});
       return res.status(400).json({
         error: 'IMPORT_FAILED',
-        reason:
-          `No file received (expected form field like "file"). ` +
-          `Found file fields: ${known.length ? known.join(', ') : 'none'}`,
+        reason: `No file received (expected a form field like "file"). Found file fields: ${known.length ? known.join(', ') : 'none'}`,
       });
     }
 
-    const filepath = fileObj.filepath || fileObj.path;
-    if (!filepath) {
-      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Unable to read uploaded file path' });
+    const filepath = fileObj.filepath || fileObj.path || null;
+    const buffer = fileObj.buffer || null;
+
+    if (!filepath && !buffer) {
+      return res.status(400).json({
+        error: 'IMPORT_FAILED',
+        reason: 'Unable to read uploaded file path or buffer (check formidable configuration)',
+      });
     }
 
     if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
@@ -176,7 +188,7 @@ export default async function handler(req, res) {
 
     const key = `${year}-${String(month).padStart(2, '0')}.json`;
     const filename = lc(fileObj.originalFilename || fileObj.newFilename || '');
-    const buf = await fs.readFile(filepath);
+    const buf = buffer || (await fs.readFile(filepath));
 
     let parsed = null;
 
@@ -189,13 +201,12 @@ export default async function handler(req, res) {
         const idx = names.findIndex((n) => patterns.some((p) => lc(n).includes(lc(p))));
         return idx >= 0 ? wb.Sheets[names[idx]] : null;
       };
-      const toJson = (sheet) =>
-        sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, blankrows: false }) : [];
+      const toJson = (sheet) => (sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, blankrows: false }) : []);
 
       const overview = toJson(sheetBy(['overview', 'summary', 'totals']))[0] || {};
-      let daily = toJson(sheetBy(['daily', 'days', 'daily revenue', 'calendar', 'month']));
+      let daily     = toJson(sheetBy(['daily', 'days', 'daily revenue', 'calendar', 'month']));
       let roomTypes = toJson(sheetBy(['roomtypes', 'room types', 'types', 'rooms']));
-      let history = toJson(sheetBy(['history', 'annual', 'yoy', 'yearly']));
+      let history   = toJson(sheetBy(['history', 'annual', 'yoy', 'yearly']));
 
       if (!daily.length) {
         for (const name of wb.SheetNames) {
@@ -212,38 +223,26 @@ export default async function handler(req, res) {
       const daily = await parseCsv(buf.toString('utf8'));
       parsed = normalize({ overview: {}, daily, roomTypes: [], history: [] });
     } else {
-      return res
-        .status(400)
-        .json({ error: 'IMPORT_FAILED', reason: 'Unsupported file type (use .xlsx, .xls or .csv)' });
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Unsupported file type (use .xlsx, .xls or .csv)' });
     }
 
     const rows = parsed?.overview?.daily?.length ?? 0;
     if (!rows) {
-      return res
-        .status(400)
-        .json({ error: 'IMPORT_FAILED', reason: 'No rows found in Daily sheet (or columns not recognised)' });
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'No rows found in Daily sheet (or columns not recognised)' });
     }
 
-    // 1) Try bucket first
+    // Try bucket first
     const bucket = await uploadToAdminBucket(key, parsed);
-    if (bucket.ok) {
-      return res.status(200).json({ ok: true, key, rows });
-    }
+    if (bucket.ok) return res.status(200).json({ ok: true, key, rows });
 
-    // 2) Local write (dev/forced)
+    // Dev/forced local write
     if (FORCE_LOCAL_WRITE || process.env.NODE_ENV !== 'production') {
       const outDir = path.join(process.cwd(), 'public', 'data');
       await fs.mkdir(outDir, { recursive: true });
       await fs.writeFile(path.join(outDir, key), JSON.stringify(parsed, null, 2));
-      return res.status(200).json({
-        ok: true,
-        key,
-        rows,
-        note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)',
-      });
+      return res.status(200).json({ ok: true, key, rows, note: FORCE_LOCAL_WRITE ? 'written to public/data (forced)' : 'written to public/data (dev)' });
     }
 
-    // 3) Nothing configured
     return res.status(500).json({
       error: 'IMPORT_FAILED',
       reason: bucket.reason || 'No storage configured (set ADMIN_BUCKET_PUT_URL or use FORCE_LOCAL_WRITE=1 in dev)',
