@@ -188,7 +188,7 @@ export default async function handler(req, res) {
       );
 
     // top-level + totals (for compatibility)
-    return res.status(200).json({
+    return res.status(200).json({ month,
       ok: true,
       revenueToDate: revSum,
       targetToDate: tgtSum,
