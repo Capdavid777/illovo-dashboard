@@ -15,7 +15,7 @@ model DailyMetric {
   date      DateTime @unique
   revenue   Int?
   target    Int?
-  occupancy Float?      // store 46.0 for 46%
+  occupancy Float?
   arr       Int?
   notes     String?  @db.Text
   createdAt DateTime @default(now())
@@ -43,20 +43,9 @@ model YearMetric {
   id        Int   @id @default(autoincrement())
   year      Int   @unique
   roomsSold Int   @default(0)
-  occupancy Float @default(0)   // percent 0..100
-  revenue   Int   @default(0)   // consider BigInt if totals can exceed ~2.1B
-  rate      Int   @default(0)   // ADR
-
+  occupancy Float @default(0)
+  revenue   Int   @default(0)
+  rate      Int   @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-
-/*
-ALT (optional): use BigInt for revenue if values can exceed 2,147,483,647.
-If you switch to BigInt, update both the schema and the DB via a migration,
-and remember to handle BigInt in JSON serialization.
-
-  // DailyMetric.revenue   BigInt?
-  // RoomTypeMetric.revenue BigInt?
-  // YearMetric.revenue    BigInt @default(0)
-*/
