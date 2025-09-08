@@ -69,33 +69,48 @@ function useMonthParam() {
 
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
-  const prev = () => { const nk = toKey(new Date(d.getFullYear(), d.getMonth() - 1, 1)); if (!minKey || nk >= minKey) onChange(nk); };
-  const next = () => { const nk = toKey(new Date(d.getFullYear(), d.getMonth() + 1, 1)); if (!maxKey || nk <= maxKey) onChange(nk); };
 
+  const prev = () => {
+    const nk = toKey(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    if (!minKey || nk >= minKey) onChange(nk);
+  };
+  const next = () => {
+    const nk = toKey(new Date(d.getFullYear(), d.getMonth() + 1, 1));
+    if (!maxKey || nk <= maxKey) onChange(nk);
+  };
+
+  // Build month options deterministically (no IIFE / no hooks)
   const options = (() => {
     const out = [];
     const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
     const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
     const cur = new Date(start);
-    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
+    while (cur <= end) {
+      out.push(toKey(cur));
+      cur.setMonth(cur.getMonth() + 1);
+    }
     return out.reverse();
-  })(); })();
+  })();
 
   return (
     <div className="flex items-center gap-2">
-      <button onClick={prev} disabled={minKey && monthKey <= minKey} className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10" aria-label="Previous month" type="button">‹</button>
-      <div className="flex items-center gap-2 rounded-2xl border border-gray-300 px-3 py-2">
-        <span className="font-medium whitespace-nowrap">{fmtMonth(d)}</span>
-      </div>
-      <button onClick={next} disabled={maxKey && monthKey >= maxKey} className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-gray-300 bg-white/5 text-sm disabled:opacity-40 hover:bg-white/10" aria-label="Next month" type="button">›</button>
-      <select value={monthKey} onChange={(e) => onChange(e.target.value)} className="ml-2 rounded-xl border border-gray-300 bg-transparent px-2 py-1 text-sm" aria-label="Jump to month">
-        {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
+      <button onClick={prev} className="px-2 py-1 border rounded">&lt;</button>
+      <div className="font-medium">{fmtMonth(d)}</div>
+      <button onClick={next} className="px-2 py-1 border rounded">&gt;</button>
+      <select
+        value={monthKey}
+        onChange={(e) => onChange(e.target.value)}
+        className="ml-2 rounded border border-gray-300 bg-white/0 bg-transparent px-2 py-1 text-sm"
+        aria-label="Jump to month"
+      >
+        {options.map((k) => (
+          <option key={k} value={k}>{fmtMonth(fromKey(k))}</option>
+        ))}
       </select>
     </div>
   );
 }
-
-/* ------------------------------ deep helpers for normalization ------------------------------ */
+/* ------------------------------ deep helpers/* ------------------------------ deep helpers for normalization ------------------------------ */
 
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
@@ -229,11 +244,11 @@ const Dashboard = ({ overview }) => {
   const debugOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
-  })(); })();
+  })();
   const inspectOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
-  })(); })();
+  })();
 
   useEffect(() => {
     let alive = true;
@@ -267,7 +282,9 @@ const Dashboard = ({ overview }) => {
       return { ok: false, status: r.status, jsonCt: isJson(r) };
     }
 
-    (()=>{ const capturedMonth = month; return (()=>{ const capturedMonth2 = month; return (async () => { try { const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
+    (async () => {
+      try {
+        const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
           if (alive) { setMonthOverview(r1.json?.overview || r1.json || null); setLoading(false); }
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
@@ -282,7 +299,7 @@ const Dashboard = ({ overview }) => {
           tryJson(`/api/overview?month=${month}`, 'admin-db/overview'),
           tryJson(`/api/daily-metrics?month=${month}`, 'admin-db/daily'),
         ]);
-        if ((ov.ok || dm.ok) && capturedMonth2 === month) {
+        if (ov.ok || dm.ok) {
           const ovJson = ov.ok ? ov.json : null;
           const dmJson = dm.ok ? dm.json : null;
           const daily =
@@ -308,7 +325,7 @@ const Dashboard = ({ overview }) => {
       } catch (e) { record({ source: 'static (/public/data)', error: String(e) }); }
 
       if (alive) { setMonthOverview(null); setLoading(false); }
-    })(); })();
+    })();
 
     return () => { alive = false; };
   }, [month, inspectOn]);
