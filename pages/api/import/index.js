@@ -1,223 +1,158 @@
 // pages/api/import/index.js
-import { getSession } from '@auth0/nextjs-auth0';
+import fs from 'fs/promises';
+import path from 'path';
 import formidable from 'formidable';
-import xlsx from 'xlsx';
-import prisma from '../../../lib/prisma';
 
 export const config = {
-  api: { bodyParser: false },     // required for formidable (multipart)
-  runtime: 'nodejs',              // ensure Node.js runtime (not edge)
+  api: { bodyParser: false }, // let formidable parse multipart/form-data
 };
 
-/* ------------------------------ helpers ------------------------------ */
-
-const toNum = (v, d = 0) => {
-  const n = Number(String(v).replace(/[^\d.-]/g, ''));
-  return Number.isFinite(n) ? n : d;
+const num = (v) => {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const s = String(v).replace(/[^0-9.-]+/g, '');
+  const n = s ? Number(s) : 0;
+  return Number.isFinite(n) ? n : 0;
 };
-const toPct = (v, d = 0) => toNum(v, d); // your reports are already 0..100
-
-const pickKey = (row, candidates) => {
-  const keys = Object.keys(row || {});
-  for (const want of candidates) {
-    const hit = keys.find(k => k.trim().toLowerCase() === want.toLowerCase());
-    if (hit) return hit;
-  }
-  return null;
+const asPct = (v) => {
+  const n = num(v);
+  return n <= 1.5 ? n * 100 : n;
 };
 
-// Detect sheet “type” by the headers
-function classifySheet(rows) {
-  if (!rows || !rows.length) return 'unknown';
-  const sample = rows[0];
-  const keys = Object.keys(sample).map(k => k.toLowerCase());
-
-  const hasDay   = keys.some(k => k.includes('day') || k.includes('date'));
-  const hasTgt   = keys.some(k => k.includes('target'));
-  const hasRev   = keys.some(k => k.includes('revenue'));
-  const hasOcc   = keys.some(k => k.includes('occupancy'));
-  const hasRate  = keys.some(k => k.includes('rate'));
-
-  const hasType  = keys.some(k => ['type','room type','roomtype'].includes(k));
-  const hasSold  = keys.some(k => k.includes('sold') || k.includes('available'));
-  const hasYear  = keys.includes('year');
-
-  if (hasYear && hasRev) return 'yearly';
-  if (hasType && (hasRev || hasRate || hasOcc || hasSold)) return 'roomtypes';
-  if (hasDay && (hasTgt || hasRev)) return 'daily';
-  return 'unknown';
+async function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (!lines.length) return [];
+  const headers = lines.shift().split(',').map(s => s.trim());
+  return lines.map((row) => {
+    const vals = row.split(',').map(s => s.trim());
+    const o = {};
+    headers.forEach((h, i) => (o[h] = vals[i]));
+    return o;
+  });
 }
 
-/* ------------------------------ importers ------------------------------ */
+function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) {
+  const dailyData = daily.map((d, i) => ({
+    day: num(d.day) || (d.date ? new Date(d.date).getDate() : i + 1),
+    date: d.date ?? null,
+    revenue: num(d.revenue ?? d.actual),
+    target: num(d.target ?? d.budget),
+    rate: num(d.rate ?? d.arr ?? d.adr),
+    occupancy: asPct(d.occupancy ?? d.occ),
+  }));
 
-async function importDaily(rows, year, month) {
-  const sample = rows[0];
-  const dayKey  = pickKey(sample, ['day', 'date', 'd']);
-  const tgtKey  = pickKey(sample, ['daily target', 'target']);
-  const revKey  = pickKey(sample, ['daily revenue', 'revenue']);
-  const occKey  = pickKey(sample, ['daily occupancy %', 'occupancy %', 'occupancy']);
-  const arrKey  = pickKey(sample, ['average daily rate', 'avg daily rate', 'arr', 'rate']);
-
-  if (!dayKey || !revKey || !tgtKey) throw new Error('Missing required columns for daily sheet');
-
-  let upserts = 0;
-  for (const r of rows) {
-    const rawDay = r[dayKey];
-    const day = Number(String(rawDay).replace(/[^\d]/g, ''));
-    if (!Number.isInteger(day) || day < 1 || day > 31) continue;
-
-    const date = new Date(year, month - 1, day);
-    const target    = toNum(r[tgtKey], 0);
-    const revenue   = toNum(r[revKey], 0);
-    const occupancy = occKey ? toPct(r[occKey], null) : null;
-    const arr       = arrKey ? toNum(r[arrKey], null) : null;
-
-    // skip totally blank rows
-    if ([target, revenue, occupancy, arr].every(v => v === 0 || v === null)) continue;
-
-    await prisma.dailyMetric.upsert({
-      where: { date },
-      create: { date, target, revenue, occupancy, arr },
-      update: { target, revenue, occupancy, arr },
-    });
-    upserts++;
-  }
-  return { kind: 'daily', upserts };
+  return {
+    overview: {
+      revenueToDate: num(overview.revenueToDate ?? overview.revenue),
+      targetToDate:  num(overview.targetToDate ?? overview.target),
+      averageRoomRate: num(overview.averageRoomRate ?? overview.arr ?? overview.adr),
+      occupancyRate:  asPct(overview.occupancyRate ?? overview.occupancy),
+      daily: dailyData,
+      roomTypes: roomTypes.map(r => ({
+        type: r.type || r.name || 'Unknown',
+        available: num(r.available),
+        sold: num(r.sold),
+        revenue: num(r.revenue),
+        rate: num(r.rate ?? r.arr ?? r.adr),
+        occupancy: asPct(r.occupancy ?? r.occ),
+      })),
+      history: history.map(h => ({
+        year: String(h.year ?? h.Year ?? ''),
+        roomsSold: num(h.roomsSold ?? h['rooms sold']),
+        occupancy: asPct(h.occupancy ?? h.Occupancy),
+        revenue: num(h.revenue ?? h.Revenue),
+        rate: num(h.rate ?? h['avg rate']),
+      })),
+      lastUpdated: new Date().toISOString(),
+    }
+  };
 }
 
-async function importRoomTypes(rows, year, month) {
-  const sample = rows[0];
-  const typeKey  = pickKey(sample, ['type', 'room type']);
-  if (!typeKey) throw new Error('Missing "Type/Room Type" column for room types sheet');
+async function uploadToAdminBucket(key, json) {
+  const url = process.env.ADMIN_BUCKET_PUT_URL;
+  const token = process.env.ADMIN_BUCKET_TOKEN;
+  if (!url) return { ok: false, reason: 'ADMIN_BUCKET_PUT_URL not configured' };
 
-  const roomsKey = pickKey(sample, ['rooms', 'total rooms']);
-  const availKey = pickKey(sample, ['available', 'availability', 'room nights available']);
-  const soldKey  = pickKey(sample, ['sold', 'room nights sold', 'nights sold']);
-  const revKey   = pickKey(sample, ['revenue', 'room revenue']);
-  const rateKey  = pickKey(sample, ['rate', 'avg rate', 'average rate']);
-  const occKey   = pickKey(sample, ['occupancy', 'occupancy %']);
-
-  let upserts = 0;
-  for (const r of rows) {
-    const type = String(r[typeKey] ?? '').trim();
-    if (!type) continue;
-
-    // represent monthly snapshot as last day of month
-    const date = new Date(year, month, 0);
-
-    const rooms     = roomsKey ? toNum(r[roomsKey], null) : null;
-    const available = availKey ? toNum(r[availKey], null) : null;
-    const sold      = soldKey  ? toNum(r[soldKey], null)  : null;
-    const revenue   = revKey   ? toNum(r[revKey], null)   : null;
-    const rate      = rateKey  ? toNum(r[rateKey], null)  : null;
-    const occupancy = occKey   ? toPct(r[occKey], null)   : null;
-
-    await prisma.roomTypeMetric.upsert({
-      where: { date_type: { date, type } },
-      create: { date, type, rooms, available, sold, revenue, rate, occupancy },
-      update: { rooms, available, sold, revenue, rate, occupancy },
-    });
-    upserts++;
-  }
-  return { kind: 'roomtypes', upserts };
+  const res = await fetch(`${url}?key=${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(json),
+  });
+  const txt = await res.text().catch(() => '');
+  return res.ok ? { ok: true } : { ok: false, reason: `bucket upload failed (${res.status}): ${txt.slice(0, 200)}` };
 }
-
-async function importYearly(rows) {
-  const sample = rows[0];
-  const yearKey = pickKey(sample, ['year']);
-  if (!yearKey) throw new Error('Missing "Year" column for yearly sheet');
-
-  const roomsKey = pickKey(sample, ['rooms sold', 'room nights sold', 'roomsold']);
-  const occKey   = pickKey(sample, ['occupancy', 'occupancy %']);
-  const revKey   = pickKey(sample, ['revenue', 'room revenue', 'total revenue']);
-  const rateKey  = pickKey(sample, ['rate', 'avg rate', 'average rate']);
-
-  let upserts = 0;
-  for (const r of rows) {
-    const year = Number(String(r[yearKey]).replace(/[^\d]/g, ''));
-    if (!Number.isInteger(year) || year < 2000 || year > 2100) continue;
-
-    const roomsSold = roomsKey ? toNum(r[roomsKey], null) : null;
-    const occupancy = occKey ? toPct(r[occKey], null) : null;
-    const revenue   = revKey ? toNum(r[revKey], null) : null;
-    const rate      = rateKey ? toNum(r[rateKey], null) : null;
-
-    await prisma.yearMetric.upsert({
-      where: { year },
-      create: { year, roomsSold, occupancy, revenue, rate },
-      update: { roomsSold, occupancy, revenue, rate },
-    });
-    upserts++;
-  }
-  return { kind: 'yearly', upserts };
-}
-
-/* ------------------------------ handler ------------------------------ */
 
 export default async function handler(req, res) {
-  // Auth guard
-  const session = await getSession(req, res);
-  if (!session?.user) {
-    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-  }
-
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ ok: false, error: 'METHOD_NOT_ALLOWED' });
+    return res.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
   }
-
-  res.setHeader('Cache-Control', 'no-store');
 
   try {
-    // Parse multipart form
     const form = formidable({ multiples: false, keepExtensions: true });
     const { fields, files } = await new Promise((resolve, reject) => {
       form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve({ fields: flds, files: fls })));
     });
 
-    // Normalize field shapes
-    const pickFirst = (v) => Array.isArray(v) ? v[0] : v;
-    const year  = Number(pickFirst(fields.year));
-    const month = Number(pickFirst(fields.month));
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-      return res.status(400).json({ ok: false, error: 'Invalid year/month' });
+    const year = Number(fields.year);
+    const month = Number(fields.month);
+    const file = files.file || files.report || files.upload;
+
+    if (!file || !file.filepath) {
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'No file received (expected form field "file")' });
+    }
+    if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Invalid year/month' });
     }
 
-    let upload = pickFirst(files.file);
-    if (!upload) return res.status(400).json({ ok: false, error: 'File is required' });
+    const key = `${year}-${String(month).padStart(2, '0')}.json`;
+    const filename = (file.originalFilename || file.newFilename || '').toLowerCase();
+    const buf = await fs.readFile(file.filepath);
 
-    // Read workbook
-    const wb = xlsx.readFile(upload.filepath);
-    const summaries = [];
+    let parsed = null;
 
-    for (const name of wb.SheetNames) {
-      const ws = wb.Sheets[name];
-      const rows = xlsx.utils.sheet_to_json(ws, { defval: '' });
-      if (!rows.length) {
-        summaries.push({ sheet: name, skipped: true, reason: 'empty' });
-        continue;
-      }
+    if (filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
+      const XLSX = (await import('xlsx')).default;
+      const wb = XLSX.read(buf, { type: 'buffer' });
 
-      const kind = classifySheet(rows);
+      const by = (want) => wb.Sheets[wb.SheetNames.find(s => s.toLowerCase() === want)];
+      const toJson = (sheet) => (sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '' }) : []);
 
-      if (kind === 'daily') {
-        const s = await importDaily(rows, year, month);
-        summaries.push({ sheet: name, ...s });
-      } else if (kind === 'roomtypes') {
-        const s = await importRoomTypes(rows, year, month);
-        summaries.push({ sheet: name, ...s });
-      } else if (kind === 'yearly') {
-        const s = await importYearly(rows);
-        summaries.push({ sheet: name, ...s });
-      } else {
-        summaries.push({ sheet: name, skipped: true, reason: 'unrecognized' });
-      }
+      const overview = toJson(by('overview'))[0] || {};
+      const daily = toJson(by('daily'));
+      const roomTypes = toJson(by('roomtypes'));
+      const history = toJson(by('history'));
+
+      parsed = normalize({ overview, daily, roomTypes, history });
+    } else if (filename.endsWith('.csv')) {
+      const daily = await parseCsv(buf.toString('utf8'));
+      parsed = normalize({ overview: {}, daily, roomTypes: [], history: [] });
+    } else {
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'Unsupported file type (use .xlsx or .csv)' });
     }
 
-    return res.status(200).json({ ok: true, summaries });
+    const rows = parsed?.overview?.daily?.length ?? 0;
+    if (!rows) {
+      return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'No rows found in Daily sheet' });
+    }
+
+    // Try bucket first
+    const bucket = await uploadToAdminBucket(key, parsed);
+    if (bucket.ok) {
+      return res.status(200).json({ ok: true, key, rows });
+    }
+
+    // Dev fallback: write to public/data locally
+    if (process.env.NODE_ENV !== 'production') {
+      await fs.mkdir(path.join(process.cwd(), 'public', 'data'), { recursive: true });
+      await fs.writeFile(path.join(process.cwd(), 'public', 'data', key), JSON.stringify(parsed, null, 2));
+      return res.status(200).json({ ok: true, key, rows, note: 'written to public/data (dev fallback)' });
+    }
+
+    return res.status(500).json({ error: 'IMPORT_FAILED', reason: bucket.reason || 'No storage configured' });
   } catch (err) {
-    console.error('import error:', err);
-    return res.status(500).json({ ok: false, error: 'IMPORT_FAILED' });
+    return res.status(500).json({ error: 'IMPORT_FAILED', reason: String(err?.message || err) });
   }
-  // NOTE: do not prisma.$disconnect() here; keep singleton open in serverless
 }
