@@ -79,7 +79,7 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     if (!maxKey || nk <= maxKey) onChange(nk);
   };
 
-  // Build month options deterministically (no IIFE / no hooks)
+  // Build month options deterministically
   const options = (() => {
     const out = [];
     const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
@@ -94,13 +94,23 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
 
   return (
     <div className="flex items-center gap-2">
-      <button onClick={prev} className="px-2 py-1 border rounded">&lt;</button>
-      <div className="font-medium">{fmtMonth(d)}</div>
-      <button onClick={next} className="px-2 py-1 border rounded">&gt;</button>
+      <button onClick={prev} className="px-2 py-1 border rounded" type="button" aria-label="Previous month">
+        &lt;
+      </button>
+
+      {/* Force dark text so it’s visible on the light header */}
+      <div className="font-medium text-neutral-900">{fmtMonth(d)}</div>
+
+      <button onClick={next} className="px-2 py-1 border rounded" type="button" aria-label="Next month">
+        &gt;
+      </button>
+
+      {/* Force readable select: white bg + dark text (inline style beats global CSS) */}
       <select
         value={monthKey}
         onChange={(e) => onChange(e.target.value)}
-        className="ml-2 rounded border border-gray-300 bg-white/0 bg-transparent px-2 py-1 text-sm"
+        className="ml-2 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+        style={{ color: '#111827' }}
         aria-label="Jump to month"
       >
         {options.map((k) => (
