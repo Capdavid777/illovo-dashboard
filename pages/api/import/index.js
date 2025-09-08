@@ -2,7 +2,7 @@
 import { getSession } from '@auth0/nextjs-auth0';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
-import prisma from '../../lib/prisma'; // use your singleton
+import prisma from '../../../lib/prisma'; // use your singleton
 
 export const config = {
   api: { bodyParser: false },     // required for formidable (multipart)
