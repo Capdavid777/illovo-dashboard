@@ -17,14 +17,10 @@ a {
   @apply text-gold underline-offset-4;
   text-underline-position: from-font;
 }
-a:hover {
-  text-decoration: underline;
-}
+a:hover { text-decoration: underline; }
 
 /* Headings */
-h1, h2, h3, h4 {
-  @apply font-semibold text-white;
-}
+h1, h2, h3, h4 { @apply font-semibold text-white; }
 
 /* Buttons (generic) */
 button {
@@ -32,31 +28,21 @@ button {
   background-color: #CBA135;
   color: #000000;
 }
-button:hover:not(:disabled) {
-  background-color: #e6c767; /* lighter gold */
-}
-button:disabled {
-  @apply opacity-50 cursor-not-allowed;
-}
+button:hover:not(:disabled) { background-color: #e6c767; }
+button:disabled { @apply opacity-50 cursor-not-allowed; }
 
 /* Form inputs */
 input, textarea, select {
   @apply rounded-lg border border-neutral-700 bg-neutral-800 text-white px-3 py-2;
 }
 input:focus, textarea:focus, select:focus {
-  @apply outline-none ring-2 ring-neutral-600;
+  @apply outline-none ring-2 ring-[#CBA135];
 }
 
 /* Tables */
-table {
-  @apply w-full border-collapse text-sm;
-}
-th {
-  @apply text-left border-b border-neutral-700 pb-2 font-medium text-neutral-400;
-}
-td {
-  @apply border-b border-neutral-800 py-2;
-}
+table { @apply w-full border-collapse text-sm; }
+th { @apply text-left border-b border-neutral-700 pb-2 font-medium text-neutral-400; }
+td { @apply border-b border-neutral-800 py-2; }
 
 /* Utility helpers */
 .text-gold { color: #CBA135; }
