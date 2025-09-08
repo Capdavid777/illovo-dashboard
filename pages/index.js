@@ -8,7 +8,7 @@ function Home({ overview = null }) {
 
 export default withPageAuthRequired(Home, {
   getServerSideProps: async () => {
-    // Let client-side fetch load the data; keeps SSR simple/robust
+    // Let the client fetch; avoids SSR failures if data isn't ready
     return { props: { overview: null } };
   },
 });
