@@ -23,13 +23,15 @@ const num = (v) => {
 const asPct = (v) => (num(v) <= 1.5 ? num(v) * 100 : num(v));
 const lc = (s) => String(s || '').toLowerCase().trim();
 
-/** case-insensitive contains/equal key pick with simple synonym tolerance */
+const hasKeys = (row, keys) =>
+  keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
+
+/** header matching with tolerant substring checks (both directions) */
 const pick = (row, ...cands) => {
   if (!row || typeof row !== 'object') return undefined;
   const keys = Object.keys(row);
   for (const cand of cands) {
     const want = lc(cand);
-    // exact or substring match (both ways so "arr/adr" or "average rate" still match)
     const hitKey = keys.find((k) => {
       const kk = lc(k);
       return kk === want || kk.includes(want) || want.includes(kk);
@@ -39,9 +41,7 @@ const pick = (row, ...cands) => {
   return undefined;
 };
 
-const hasKeys = (row, keys) =>
-  keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
-
+/** read raw body for non-multipart uploads */
 async function readRawBody(req) {
   return await new Promise((resolve, reject) => {
     const chunks = [];
@@ -85,6 +85,90 @@ async function parseCsv(text) {
   });
 }
 
+/* ------------------------------ helpers to infer room-types numbers ------------------------------ */
+
+/** make a {key: numericValue} map from a row */
+function numericMap(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row || {})) {
+    const n = num(v);
+    if (Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+}
+
+/** return the first numeric value whose key matches any needle; otherwise undefined */
+function findByKeyIncludes(nmap, ...needles) {
+  const keys = Object.keys(nmap);
+  for (const n of needles) {
+    const w = lc(n);
+    const hit = keys.find((k) => {
+      const kk = lc(k);
+      return kk === w || kk.includes(w) || w.includes(kk);
+    });
+    if (hit) return nmap[hit];
+  }
+  return undefined;
+}
+
+/** heuristics to infer revenue/sold/available/rate when header match fails */
+function inferRoomTypeNumbers(row, current) {
+  const out = { ...current };
+  const nmap = numericMap(row);
+
+  // Try direct keyword-based first if still zero
+  if (!out.revenue) {
+    out.revenue = findByKeyIncludes(
+      nmap,
+      'revenue', 'room revenue', 'total revenue', 'accommodation revenue', 'rev', 'mtd revenue'
+    ) || 0;
+  }
+  if (!out.sold) {
+    out.sold = findByKeyIncludes(
+      nmap,
+      'sold', 'rooms sold', 'sold rooms', 'nights sold', 'room nights sold', 'booked', 'occupied'
+    ) || 0;
+  }
+  if (!out.available) {
+    out.available = findByKeyIncludes(
+      nmap,
+      'available', 'rooms available', 'available rooms', 'available nights', 'nights available', 'avail'
+    ) || 0;
+  }
+  if (!out.rate) {
+    out.rate = findByKeyIncludes(
+      nmap,
+      'rate', 'avg rate', 'average rate', 'arr', 'adr', 'arr/adr'
+    ) || 0;
+  }
+
+  // Soft heuristics:
+  // - revenue is often the LARGEST number
+  if (!out.revenue) {
+    const vals = Object.values(nmap);
+    out.revenue = vals.length ? Math.max(...vals) : 0;
+  }
+
+  // - available is a bigger count; sold <= available
+  if (!out.available && out.sold) {
+    const candidate = Object.values(nmap).filter((v) => v >= out.sold && v <= 100000);
+    out.available = candidate.length ? Math.max(...candidate) : 0;
+  }
+
+  // - sold could be the largest "count-like" number (<= available, <= ~5000)
+  if (!out.sold && out.available) {
+    const candidate = Object.values(nmap).filter((v) => v <= out.available && v <= 5000);
+    out.sold = candidate.length ? Math.max(...candidate) : 0;
+  }
+
+  // - rate ~ revenue / sold
+  if (!out.rate && out.revenue && out.sold) {
+    out.rate = Math.round(out.revenue / Math.max(1, out.sold));
+  }
+
+  return out;
+}
+
 /* ------------------------------ normalize ------------------------------ */
 
 function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) {
@@ -113,17 +197,29 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     };
   });
 
-  // --- Room Types (case-insensitive + common synonyms)
-  const roomTypesNorm = (roomTypes || []).map((r) => ({
-    type:       pick(r, 'type', 'name', 'room type', 'roomtype') || 'Unknown',
-    available:  num(pick(r, 'available', 'Available', 'rooms available', 'available rooms', 'avail')),
-    sold:       num(pick(r, 'sold', 'Sold', 'rooms sold', 'sold rooms', 'occupied', 'booked')),
-    revenue:    num(pick(r, 'revenue', 'Revenue', 'room revenue', 'accommodation revenue', 'total revenue')),
-    rate:       num(pick(r, 'rate', 'Rate', 'arr', 'ARR', 'adr', 'ADR', 'arr/adr', 'avg rate', 'average rate')),
-    occupancy:  asPct(pick(r, 'occupancy', 'Occupancy', 'occ', 'Occ', 'occ%')),
-  }));
+  // --- Room Types (robust header matching + inference fallback)
+  const roomTypesNorm = (roomTypes || []).map((r) => {
+    const picked = {
+      type:       pick(r, 'type', 'name', 'room type', 'roomtype') || 'Unknown',
+      available:  num(pick(r, 'available', 'Available', 'rooms available', 'available rooms', 'available nights', 'nights available', 'avail')),
+      sold:       num(pick(r, 'sold', 'Sold', 'rooms sold', 'sold rooms', 'nights sold', 'room nights sold', 'booked', 'occupied')),
+      revenue:    num(pick(r, 'revenue', 'Revenue', 'room revenue', 'accommodation revenue', 'total revenue', 'mtd revenue')),
+      rate:       num(pick(r, 'rate', 'Rate', 'arr', 'ARR', 'adr', 'ADR', 'arr/adr', 'avg rate', 'average rate')),
+      occupancy:  asPct(pick(r, 'occupancy', 'Occupancy', 'occ', 'Occ', 'occ%')),
+    };
 
-  // --- History (unchanged, but tolerate caps)
+    const inferred = inferRoomTypeNumbers(r, picked);
+    return {
+      type: picked.type,
+      available: inferred.available || 0,
+      sold: inferred.sold || 0,
+      revenue: inferred.revenue || 0,
+      rate: inferred.rate || 0,
+      occupancy: picked.occupancy || (inferred.available ? (100 * (inferred.sold || 0) / inferred.available) : 0),
+    };
+  });
+
+  // --- History (tolerant)
   const historyNorm = (history || []).map((h) => ({
     year: String(pick(h, 'year', 'Year') ?? ''),
     roomsSold: num(pick(h, 'roomsSold', 'rooms sold')),
