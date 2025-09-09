@@ -6,7 +6,7 @@ import formidable from 'formidable';
 import { Writable } from 'stream';
 
 export const config = {
-  api: { bodyParser: false }, // we'll read raw or use formidable ourselves
+  api: { bodyParser: false },
 };
 
 /* ------------------------------ utils ------------------------------ */
@@ -26,7 +26,6 @@ const lc = (s) => String(s || '').toLowerCase().trim();
 const hasKeys = (row, keys) =>
   keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
 
-/** header matching with tolerant substring checks (both directions) */
 const pick = (row, ...cands) => {
   if (!row || typeof row !== 'object') return undefined;
   const keys = Object.keys(row);
@@ -85,9 +84,8 @@ async function parseCsv(text) {
   });
 }
 
-/* ------------------------------ helpers to infer room-types numbers ------------------------------ */
+/* ------------------------------ room-type inference helpers ------------------------------ */
 
-/** make a {key: numericValue} map from a row */
 function numericMap(row) {
   const out = {};
   for (const [k, v] of Object.entries(row || {})) {
@@ -96,8 +94,6 @@ function numericMap(row) {
   }
   return out;
 }
-
-/** return the first numeric value whose key matches any needle; otherwise undefined */
 function findByKeyIncludes(nmap, ...needles) {
   const keys = Object.keys(nmap);
   for (const n of needles) {
@@ -110,58 +106,43 @@ function findByKeyIncludes(nmap, ...needles) {
   }
   return undefined;
 }
-
-/** heuristics to infer revenue/sold/available/rate when header match fails */
 function inferRoomTypeNumbers(row, current) {
   const out = { ...current };
   const nmap = numericMap(row);
 
-  // Try direct keyword-based first if still zero
   if (!out.revenue) {
     out.revenue = findByKeyIncludes(
-      nmap,
-      'revenue', 'room revenue', 'total revenue', 'accommodation revenue', 'rev', 'mtd revenue'
+      nmap, 'revenue', 'room revenue', 'total revenue', 'accommodation revenue', 'rev', 'mtd revenue'
     ) || 0;
   }
   if (!out.sold) {
     out.sold = findByKeyIncludes(
-      nmap,
-      'sold', 'rooms sold', 'sold rooms', 'nights sold', 'room nights sold', 'booked', 'occupied'
+      nmap, 'sold', 'rooms sold', 'sold rooms', 'nights sold', 'room nights sold', 'booked', 'occupied'
     ) || 0;
   }
   if (!out.available) {
     out.available = findByKeyIncludes(
-      nmap,
-      'available', 'rooms available', 'available rooms', 'available nights', 'nights available', 'avail'
+      nmap, 'available', 'rooms available', 'available rooms', 'available nights', 'nights available', 'avail'
     ) || 0;
   }
   if (!out.rate) {
     out.rate = findByKeyIncludes(
-      nmap,
-      'rate', 'avg rate', 'average rate', 'arr', 'adr', 'arr/adr'
+      nmap, 'rate', 'avg rate', 'average rate', 'arr', 'adr', 'arr/adr'
     ) || 0;
   }
 
-  // Soft heuristics:
-  // - revenue is often the LARGEST number
   if (!out.revenue) {
     const vals = Object.values(nmap);
     out.revenue = vals.length ? Math.max(...vals) : 0;
   }
-
-  // - available is a bigger count; sold <= available
   if (!out.available && out.sold) {
     const candidate = Object.values(nmap).filter((v) => v >= out.sold && v <= 100000);
     out.available = candidate.length ? Math.max(...candidate) : 0;
   }
-
-  // - sold could be the largest "count-like" number (<= available, <= ~5000)
   if (!out.sold && out.available) {
     const candidate = Object.values(nmap).filter((v) => v <= out.available && v <= 5000);
     out.sold = candidate.length ? Math.max(...candidate) : 0;
   }
-
-  // - rate ~ revenue / sold
   if (!out.rate && out.revenue && out.sold) {
     out.rate = Math.round(out.revenue / Math.max(1, out.sold));
   }
@@ -169,10 +150,76 @@ function inferRoomTypeNumbers(row, current) {
   return out;
 }
 
-/* ------------------------------ normalize ------------------------------ */
+/* ------------------------------ history (YoY) helpers ------------------------------ */
+
+const YEAR_RE = /^(20\d{2})$/;
+const looksLikeYearKey = (k) => {
+  const m = YEAR_RE.exec(String(k).trim());
+  if (!m) return false;
+  const y = Number(m[1]);
+  return y >= 2000 && y <= 2100;
+};
+
+/**
+ * Accepts:
+ *  A) Row-per-year shape: rows already have a Year column and metric columns
+ *  B) Transposed shape: first column is a metric name (Revenue / Rooms Sold / Occupancy / Avg Rate),
+ *     remaining headers are year numbers (2022, 2023, 2024...) => build rows per year.
+ */
+function normalizeHistoryFlexible(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+
+  const first = rows[0] || {};
+  const keys = Object.keys(first);
+
+  // A) Standard row-per-year
+  if (keys.some((k) => lc(k) === 'year' || lc(k).includes('year'))) {
+    return rows.map((h) => ({
+      year: String(pick(h, 'year', 'Year') ?? ''),
+      roomsSold: num(pick(h, 'roomsSold', 'rooms sold', 'room nights sold', 'nights sold')),
+      occupancy: asPct(pick(h, 'occupancy', 'Occupancy', 'occ', 'occ%', 'occupancy %')),
+      revenue: num(pick(h, 'revenue', 'Revenue', 'room revenue', 'total revenue', 'accommodation revenue')),
+      rate: num(pick(h, 'rate', 'avg rate', 'average rate', 'arr', 'adr')),
+    })).filter((r) => r.year);
+  }
+
+  // B) Transposed (metric rows, year columns)
+  const yearColumns = keys.filter((k) => looksLikeYearKey(k));
+  if (yearColumns.length) {
+    // pick a "label" column for the metric name
+    const labelKey =
+      keys.find((k) => ['metric', 'name', 'field', 'category', 'kpi', 'measure', 'type', 'item', 'row'].includes(lc(k))) ||
+      keys.find((k) => !yearColumns.includes(k)) || keys[0];
+
+    const buckets = {};
+    for (const y of yearColumns) buckets[y] = { year: String(y), roomsSold: 0, occupancy: 0, revenue: 0, rate: 0 };
+
+    for (const row of rows) {
+      const label = lc(row[labelKey]);
+      for (const y of yearColumns) {
+        const target = buckets[y];
+        if (!target) continue;
+        if (label.includes('revenue')) target.revenue = num(row[y]);
+        else if (label.includes('rooms sold') || label.includes('room nights') || label.includes('nights sold') || label.includes('sold'))
+          target.roomsSold = num(row[y]);
+        else if (label.includes('occupancy') || label === 'occ' || label.includes('occ%'))
+          target.occupancy = asPct(row[y]);
+        else if (label.includes('avg rate') || label.includes('average rate') || label === 'arr' || label === 'adr' || label.includes('rate'))
+          target.rate = num(row[y]);
+      }
+    }
+
+    return Object.values(buckets).filter((r) => r.year);
+  }
+
+  // Unknown shape
+  return [];
+}
+
+/* ------------------------------ normalize main ------------------------------ */
 
 function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) {
-  // --- Daily
+  // Daily
   const dailyData = daily.map((d, i) => {
     const dayCol  = pick(d, 'day', 'Day', 'd');
     const dateCol = pick(d, 'date', 'Date', 'dt', 'day date');
@@ -197,7 +244,7 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     };
   });
 
-  // --- Room Types (robust header matching + inference fallback)
+  // Room Types
   const roomTypesNorm = (roomTypes || []).map((r) => {
     const picked = {
       type:       pick(r, 'type', 'name', 'room type', 'roomtype') || 'Unknown',
@@ -207,7 +254,6 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
       rate:       num(pick(r, 'rate', 'Rate', 'arr', 'ARR', 'adr', 'ADR', 'arr/adr', 'avg rate', 'average rate')),
       occupancy:  asPct(pick(r, 'occupancy', 'Occupancy', 'occ', 'Occ', 'occ%')),
     };
-
     const inferred = inferRoomTypeNumbers(r, picked);
     return {
       type: picked.type,
@@ -219,16 +265,10 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     };
   });
 
-  // --- History (tolerant)
-  const historyNorm = (history || []).map((h) => ({
-    year: String(pick(h, 'year', 'Year') ?? ''),
-    roomsSold: num(pick(h, 'roomsSold', 'rooms sold')),
-    occupancy: asPct(pick(h, 'occupancy', 'Occupancy')),
-    revenue: num(pick(h, 'revenue', 'Revenue')),
-    rate: num(pick(h, 'rate', 'avg rate', 'average rate')),
-  }));
+  // History (flexible)
+  const historyNorm = normalizeHistoryFlexible(history);
 
-  // --- Overview summary with tolerant keys
+  // Overview summary
   const ovRevenue = num(pick(overview, 'revenueToDate', 'revenue to date', 'revenue'));
   const ovTarget  = num(pick(overview, 'targetToDate', 'target to date', 'target'));
   const ovArr     = num(pick(overview, 'averageRoomRate', 'avg rate', 'arr', 'adr', 'average rate'));
@@ -277,12 +317,11 @@ export default async function handler(req, res) {
     let year, month, filename, buf;
 
     if (/multipart\/form-data/i.test(ct)) {
-      // Fallback: support multipart via formidable
       const form = formidable({
         multiples: true,
         keepExtensions: true,
         uploadDir: os.tmpdir(),
-        fileWriteStreamHandler: makeMemoryWriter, // also capture a buffer
+        fileWriteStreamHandler: makeMemoryWriter,
         maxFileSize: 25 * 1024 * 1024,
       });
 
@@ -316,7 +355,6 @@ export default async function handler(req, res) {
       }
       buf = buffer || (await fs.readFile(filepath));
     } else {
-      // Preferred path: raw binary
       year = Number(req.query.year);
       month = Number(req.query.month);
       filename = lc(req.query.filename || req.headers['x-filename'] || 'upload.xlsx');
@@ -349,8 +387,12 @@ export default async function handler(req, res) {
       const overview = toJson(sheetBy(['overview', 'summary', 'totals']))[0] || {};
       let daily     = toJson(sheetBy(['daily', 'days', 'daily revenue', 'calendar', 'month']));
       let roomTypes = toJson(sheetBy(['roomtypes', 'room types', 'types', 'rooms']));
-      let history   = toJson(sheetBy(['history', 'annual', 'yoy', 'yearly']));
+      let history   = toJson(sheetBy([
+        'history', 'historical', 'yearly', 'annual', 'yoy', 'yo y', 'year on year',
+        'year-on-year', 'year comparison', 'trend'
+      ]));
 
+      // daily fallback by scanning
       if (!daily.length) {
         for (const name of wb.SheetNames) {
           const sj = toJson(wb.Sheets[name]);
@@ -359,6 +401,23 @@ export default async function handler(req, res) {
           }
         }
       }
+
+      // history fallback by scanning: either row-per-year or transposed year columns
+      const looksHistory = (rows) => {
+        if (!rows.length) return false;
+        const k = Object.keys(rows[0] || {});
+        return (
+          k.some((x) => lc(x).includes('year')) ||
+          k.some((x) => looksLikeYearKey(x))
+        );
+      };
+      if (!history.length) {
+        for (const name of wb.SheetNames) {
+          const sj = toJson(wb.Sheets[name]);
+          if (looksHistory(sj)) { history = sj; break; }
+        }
+      }
+
       parsed = normalize({ overview, daily, roomTypes, history });
     } else if (filename.endsWith('.csv')) {
       const daily = await parseCsv(buf.toString('utf8'));
@@ -372,7 +431,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'IMPORT_FAILED', reason: 'No rows found in Daily sheet (or columns not recognised)' });
     }
 
-    // Upload to bucket if configured; otherwise write locally in dev.
     const bucket = await uploadToAdminBucket(key, parsed);
     if (bucket.ok) return res.status(200).json({ ok: true, key, rows });
 
