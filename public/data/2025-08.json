@@ -4,7 +4,7 @@
     "targetToDate": 1403168.56,
     "averageRoomRate": 1006.34,
     "occupancyRate": 0.483324,
-    "lastUpdated": "2025-08-31T00:00:00",
+    "lastUpdated": "2025-08-31T00:00:00Z",
     "daily": [
       { "date": "2025-08-01", "day": 1, "target": 45263.501935, "revenue": 29304.13, "occupancy": 0.474576, "rate": 1046.576071 },
       { "date": "2025-08-02", "day": 2, "target": 45263.501935, "revenue": 45045.12, "occupancy": 0.745763, "rate": 1023.752727 },
