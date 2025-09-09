@@ -4,7 +4,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import {
@@ -32,7 +32,9 @@ const asPercent = (v, d = 0) => {
   const n = num(v, d);
   return n <= 1.5 ? n * 100 : n;
 };
-const currency = (n) => `R${num(n).toLocaleString()}`;
+
+/** Whole-rand money (NO cents) */
+const money = (n) => `R${Math.round(num(n)).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
@@ -67,7 +69,6 @@ function useMonthParam() {
   return { month, setMonth };
 }
 
-/* ------------------------------ Month switcher (visible text) ------------------------------ */
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
   const prev = () => {
@@ -85,30 +86,32 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
     const cur = new Date(start);
     while (cur <= end) {
-      out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1);
+      out.push(toKey(cur));
+      cur.setMonth(cur.getMonth() + 1);
     }
     return out.reverse();
   })();
 
   return (
     <div className="flex items-center gap-2">
-      <button onClick={prev} className="px-2 py-1 border rounded" type="button" aria-label="Previous month">&lt;</button>
-      <div className="font-medium text-neutral-900">{fmtMonth(d)}</div>
-      <button onClick={next} className="px-2 py-1 border rounded" type="button" aria-label="Next month">&gt;</button>
+      <button onClick={prev} className="px-2 py-1 border rounded">&lt;</button>
+      <div className="font-medium">{fmtMonth(d)}</div>
+      <button onClick={next} className="px-2 py-1 border rounded">&gt;</button>
       <select
         value={monthKey}
         onChange={(e) => onChange(e.target.value)}
-        className="ml-2 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
-        style={{ color: '#111827' }}
+        className="ml-2 rounded border border-gray-300 bg-white/0 bg-transparent px-2 py-1 text-sm"
         aria-label="Jump to month"
       >
-        {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
+        {options.map((k) => (
+          <option key={k} value={k}>{fmtMonth(fromKey(k))}</option>
+        ))}
       </select>
     </div>
   );
 }
 
-/* ------------------------------ deep helpers for normalization ------------------------------ */
+/* ------------------------------ sniff/normalize helpers ------------------------------ */
 
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
@@ -172,98 +175,30 @@ function mapDailyRow(d, i) {
   };
 }
 
-/* ------------------------------ month-aware selectors ------------------------------ */
-
-const get = (obj, keys, fallback) => { for (const k of keys) if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k]; return fallback; };
-
-function pickArrayForMonth(raw, monthKey, fieldNames) {
-  // Accept: direct array, { [monthKey]: [] }, or array with per-item 'month'/'period'/'monthKey'/'date'
-  const rawField = get(raw, fieldNames, null);
-  if (!rawField) return null;
-
-  // { [monthKey]: [...] }
-  if (!Array.isArray(rawField) && typeof rawField === 'object') {
-    if (Array.isArray(rawField[monthKey])) return rawField[monthKey];
-  }
-
-  // direct array (maybe carries a month on the items)
-  if (Array.isArray(rawField)) {
-    const first = rawField[0];
-    if (first && typeof first === 'object') {
-      const monthProp = ['month', 'period', 'monthKey'].find((p) => p in first);
-      if (monthProp) {
-        const filtered = rawField.filter((r) => String(r[monthProp]) === monthKey);
-        if (filtered.length) return filtered;
-      }
-      // Allow date-based filtering if items have 'date'
-      if ('date' in first) {
-        const m = monthKey.split('-').join('-');
-        const filtered = rawField.filter((r) => {
-          const d = r.date ? new Date(r.date) : null;
-          return d && toKey(d) === monthKey;
-        });
-        if (filtered.length) return filtered;
-      }
-    }
-    // Otherwise we assume the array already belongs to the selected month
-    return rawField;
-  }
-
-  return null;
-}
-
-/* If room-types totals diverge too far from overview revenue, treat them as stale and ignore. */
-function totalsMismatch(roomTypesArr, overviewRevenue) {
-  if (!Array.isArray(roomTypesArr) || roomTypesArr.length === 0) return true;
-  const sum = roomTypesArr.reduce((a, r) => a + num(r.revenue), 0);
-  const A = Math.max(1, Math.abs(num(overviewRevenue)));
-  const gap = Math.abs(sum - num(overviewRevenue));
-  return gap / A > 0.2; // >20% off looks like a different month
-}
-
-/* ------------------------------ normalization ------------------------------ */
-
 function normalizeOverview(raw = {}) {
-  const get = (keys, fallback) => {
-    for (const k of keys) {
-      const v = raw?.[k];
-      if (v !== undefined && v !== null) return v;
-    }
-    return fallback;
-  };
+  const get = (keys, fallback) => { for (const k of keys) if (raw?.[k] !== undefined && raw?.[k] !== null) return raw[k]; return fallback; };
 
-  // Find daily array in whatever shape came back
   let dailyArr = sniffDailyArray(raw);
   if (!Array.isArray(dailyArr)) dailyArr = [];
   const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
 
-  // Pull summary values if present
   let revenueToDate   = num(get(['revenueToDate','revenue_to_date','revenue'], NaN));
   let targetToDate    = num(get(['targetToDate','target_to_date','target'], NaN));
   let averageRoomRate = num(get(['averageRoomRate','avgRoomRate','arr','adr'], NaN));
   let occupancyRate   = get(['occupancyRate','occupancy_to_date','occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  // If the summary row is blank/0 but we have daily data, fall back to totals/averages
-  const hasDaily = dailyData.length > 0;
-  const hasAnyMoney = hasDaily && dailyData.some(d => num(d.revenue) > 0 || num(d.target) > 0);
-
-  if ((!Number.isFinite(revenueToDate) || revenueToDate === 0) && hasAnyMoney) {
-    revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
-  }
-  if ((!Number.isFinite(targetToDate) || targetToDate === 0) && hasAnyMoney) {
-    targetToDate  = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
-  }
-  if ((!Number.isFinite(occupancyRate) || occupancyRate === 0) && hasDaily) {
-    const vals = dailyData.map(d => num(d.occupancy)).filter(n => Number.isFinite(n));
-    occupancyRate = vals.length ? (vals.reduce((a,b)=>a+b,0) / vals.length) : 0;
+  if (!Number.isFinite(revenueToDate) && dailyData.length) revenueToDate = dailyData.reduce((a, d) => a + num(d.revenue, 0), 0);
+  if (!Number.isFinite(targetToDate)  && dailyData.length) targetToDate  = dailyData.reduce((a, d) => a + num(d.target, 0), 0);
+  if (!Number.isFinite(occupancyRate) && dailyData.length) {
+    const vals = dailyData.map((d) => num(d.occupancy)).filter((n) => Number.isFinite(n));
+    occupancyRate = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   }
   if (!Number.isFinite(averageRoomRate)) averageRoomRate = 0;
 
   dailyData.sort((a, b) => a.day - b.day);
 
-  const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) -
-                         (Number.isFinite(revenueToDate) ? revenueToDate : 0);
+  const targetVariance = (Number.isFinite(targetToDate) ? targetToDate : 0) - (Number.isFinite(revenueToDate) ? revenueToDate : 0);
   const lastUpdated = get(['lastUpdated','updatedAt','last_updated'], null);
   const roomTypesRaw = get(['roomTypes','roomTypesData'], null);
   const historyRaw   = get(['history','yearlyData'], null);
@@ -280,6 +215,7 @@ function normalizeOverview(raw = {}) {
     history: Array.isArray(historyRaw) ? historyRaw : null,
   };
 }
+
 /* ------------------------------ palettes ------------------------------ */
 
 const ROOM_PALETTES = {
@@ -349,7 +285,7 @@ const Dashboard = ({ overview }) => {
       try {
         const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
-          if (alive) { setMonthOverview(r1.json?.overview ? r1.json.overview : r1.json); setLoading(false); }
+          if (alive) { setMonthOverview(r1.json?.overview || r1.json || null); setLoading(false); }
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
         } else {
@@ -394,7 +330,7 @@ const Dashboard = ({ overview }) => {
   }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
-  const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
+  const ov = useMemo(() => normalizeOverview(rawForNormalize), [rawForNormalize]);
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
@@ -415,10 +351,15 @@ const Dashboard = ({ overview }) => {
   });
 
   const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
-  const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
-  const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
+
+  // If API didn't provide averageRoomRate, compute a sensible fallback
+  const dailyRates = (ov.dailyData || []).map(d => num(d.rate, NaN)).filter(n => Number.isFinite(n) && n > 0);
+  const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
+  const averageRoomRateFinal = (ov.averageRoomRate && ov.averageRoomRate > 0)
+    ? ov.averageRoomRate
+    : (rtWeightedADR || dailyRateAvg || 0);
 
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
@@ -476,11 +417,11 @@ const Dashboard = ({ overview }) => {
         <div className="font-medium mb-1">Day {label}</div>
         <div className="flex items-center justify-between gap-6">
           <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" /><span>Daily Target</span></div>
-          <span className="font-medium">{currency(pData.target)}</span>
+          <span className="font-medium">{money(pData.target)}</span>
         </div>
         <div className="flex items-center justify-between gap-6 mt-1">
           <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} /><span>Actual Revenue</span></div>
-          <span className="font-medium" style={{ color: revColor }}>{currency(pData.revenue)}</span>
+          <span className="font-medium" style={{ color: revColor }}>{money(pData.revenue)}</span>
         </div>
       </div>
     );
@@ -491,10 +432,30 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
-        <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
-        <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
-        <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
+        <MetricCard
+          title="Revenue to Date"
+          value={money(ov.revenueToDate)}
+          subtitle={ov.targetToDate ? `vs ${money(ov.targetToDate)} target` : undefined}
+          icon={DollarSign}
+        />
+        <MetricCard
+          title="Occupancy Rate"
+          value={pct(ov.occupancyRate)}
+          subtitle={`vs ${pct(62)} target`}
+          icon={Users}
+        />
+        <MetricCard
+          title="Average Room Rate"
+          value={money(averageRoomRateFinal)}
+          subtitle={`vs breakeven ${money(breakevenRate)}`}
+          icon={Home}
+        />
+        <MetricCard
+          title="Target Variance"
+          value={money(Math.abs(ov.targetVariance))}
+          subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
+          icon={Target}
+        />
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
@@ -545,12 +506,19 @@ const Dashboard = ({ overview }) => {
       return asc ? arr.reverse() : arr;
     }, [roomTypeData, sortBy, asc]);
 
+    // totals for this view (whole rand)
+    const rtAvgOcc = (() => {
+      const avail = roomTypeData.reduce((a, r) => a + num(r.available), 0);
+      const sold = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
+      return avail ? Math.round((sold / avail) * 100) : 0;
+    })();
+
     return (
       <div className="space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
-          <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
-          <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
+          <MetricCard title="Revenue MTD" value={money(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
+          <MetricCard title="Weighted ADR" value={money(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
@@ -598,11 +566,11 @@ const Dashboard = ({ overview }) => {
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                   <div title="Month-to-date revenue">
                     <p className="text-gray-500">Revenue</p>
-                    <p className="font-semibold">{currency(room.revenue)}</p>
+                    <p className="font-semibold">{money(room.revenue)}</p>
                   </div>
                   <div title="Average daily rate (ADR)">
                     <p className="text-gray-500">ADR</p>
-                    <p className="font-semibold">{currency(room.rate)}</p>
+                    <p className="font-semibold">{money(room.rate)}</p>
                   </div>
                   <div className="col-span-2" title="Occupancy (sold ÷ available)">
                     <p className="text-gray-500 mb-1">Occupancy</p>
@@ -646,7 +614,7 @@ const Dashboard = ({ overview }) => {
                        }} outerRadius={80} dataKey="revenue">
                     {roomTypeData.map((r, idx) => (<Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />))}
                   </Pie>
-                  <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
+                  <RechartsTooltip formatter={(value) => [`${money(value)}`, 'Revenue']} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -662,7 +630,7 @@ const Dashboard = ({ overview }) => {
                   <YAxis tick={Y_TICK_SMALL} />
                   <RechartsTooltip formatter={(value, name) => {
                     if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
-                    if (name === 'rate') return [currency(value), 'ADR'];
+                    if (name === 'rate') return [money(value), 'ADR'];
                     return [value, name];
                   }} />
                   <Legend />
@@ -679,18 +647,19 @@ const Dashboard = ({ overview }) => {
 
   const HistoricalView = () => (
     <div className="space-y-8">
+      {/* … unchanged historical content (uses money() so it has no cents) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-lg shadow-lg">
           <h3 className="text-lg font-semibold mb-4">Annual Revenue Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+              <BarChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
-                <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
-                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} dot />
-              </LineChart>
+                <RechartsTooltip formatter={(value) => [`${money(value)}`, 'Revenue']} />
+                <Bar dataKey="revenue" fill="#3B82F6" name="Revenue" />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -699,13 +668,13 @@ const Dashboard = ({ overview }) => {
           <h3 className="text-lg font-semibold mb-4">Occupancy Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+              <BarChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
                 <RechartsTooltip formatter={(value) => [`${Math.round(num(value))}%`, 'Occupancy']} />
-                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} dot />
-              </LineChart>
+                <Bar dataKey="occupancy" fill="#10B981" name="Occupancy (%)" />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -730,8 +699,8 @@ const Dashboard = ({ overview }) => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{y.year}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{num(y.roomsSold)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pct(asPercent(y.occupancy))}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.revenue)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.rate)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{money(y.revenue)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{money(y.rate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -741,36 +710,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------ layout & debug ------------------------------ */
-
-  const Inspector = () => {
-    if (!inspectOn) return null;
-    const dailySum = ov.dailyData.reduce((a, d) => a + num(d.revenue), 0);
-    const targetSum = ov.dailyData.reduce((a, d) => a + num(d.target), 0);
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
-          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle)</div>
-          {rawSlice && (
-            <>
-              <div><b>Raw slice ({rawSlice.tag}):</b></div>
-              <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
-            </>
-          )}
-          <div><b>Normalization summary:</b></div>
-          <pre className="overflow-auto">{JSON.stringify({
-            month,
-            dailyRows: ov.dailyData.length,
-            dailySumRevenue: dailySum,
-            dailySumTarget: targetSum,
-            revenueToDate: ov.revenueToDate,
-            targetToDate: ov.targetToDate,
-            occupancyRate: ov.occupancyRate,
-          }, null, 2)}</pre>
-        </div>
-      </div>
-    );
-  };
+  const Inspector = () => null; // keep silent by default to stay concise
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -809,14 +749,6 @@ const Dashboard = ({ overview }) => {
           )}
         </div>
       </div>
-
-      {debugOn && sourceInfo && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-          <pre className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 overflow-auto">
-            {JSON.stringify(sourceInfo, null, 2)}
-          </pre>
-        </div>
-      )}
 
       <Inspector />
 
