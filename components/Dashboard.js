@@ -32,7 +32,7 @@ const asPercent = (v, d = 0) => {
   const n = num(v, d);
   return n <= 1.5 ? n * 100 : n;
 };
-const currency0 = (n) => `R${Math.round(num(n);
+const currency = (n) => `R${num(n).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
