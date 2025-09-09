@@ -22,6 +22,23 @@ const num = (v) => {
 };
 const asPct = (v) => (num(v) <= 1.5 ? num(v) * 100 : num(v));
 const lc = (s) => String(s || '').toLowerCase().trim();
+
+/** case-insensitive contains/equal key pick with simple synonym tolerance */
+const pick = (row, ...cands) => {
+  if (!row || typeof row !== 'object') return undefined;
+  const keys = Object.keys(row);
+  for (const cand of cands) {
+    const want = lc(cand);
+    // exact or substring match (both ways so "arr/adr" or "average rate" still match)
+    const hitKey = keys.find((k) => {
+      const kk = lc(k);
+      return kk === want || kk.includes(want) || want.includes(kk);
+    });
+    if (hitKey != null) return row[hitKey];
+  }
+  return undefined;
+};
+
 const hasKeys = (row, keys) =>
   keys.some((k) => Object.keys(row || {}).some((rk) => lc(rk) === lc(k) || lc(rk).includes(lc(k))));
 
@@ -68,14 +85,17 @@ async function parseCsv(text) {
   });
 }
 
+/* ------------------------------ normalize ------------------------------ */
+
 function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) {
+  // --- Daily
   const dailyData = daily.map((d, i) => {
-    const dayCol = d.day ?? d.Day ?? d.d ?? d.D;
-    const dateCol = d.date ?? d.Date ?? d.dt ?? d.Dt ?? d['day date'];
-    const revCol = d.revenue ?? d.Revenue ?? d.actual ?? d['actual revenue'] ?? d['accommodation revenue'] ?? d['total revenue'];
-    const tgtCol = d.target ?? d.Target ?? d.budget ?? d.Budget ?? d['daily target'];
-    const rateCol = d.rate ?? d.Rate ?? d.arr ?? d.ARR ?? d.adr ?? d.ADR ?? d['average rate'];
-    const occCol = d.occupancy ?? d.Occupancy ?? d.occ ?? d['occ%'] ?? d['occupancy rate'];
+    const dayCol  = pick(d, 'day', 'Day', 'd');
+    const dateCol = pick(d, 'date', 'Date', 'dt', 'day date');
+    const revCol  = pick(d, 'revenue', 'Revenue', 'actual', 'actual revenue', 'accommodation revenue', 'total revenue', 'room revenue');
+    const tgtCol  = pick(d, 'target', 'Target', 'budget', 'Budget', 'daily target', 'goal', 'forecast');
+    const rateCol = pick(d, 'rate', 'Rate', 'arr', 'ARR', 'adr', 'ADR', 'arr/adr', 'avg rate', 'average rate');
+    const occCol  = pick(d, 'occupancy', 'Occupancy', 'occ', 'occ%', 'occupancy rate');
 
     let day = num(dayCol);
     if (!day && dateCol) {
@@ -83,35 +103,56 @@ function normalize({ overview = {}, daily = [], roomTypes = [], history = [] }) 
     }
     if (!day) day = i + 1;
 
-    return { day, date: dateCol ?? null, revenue: num(revCol), target: num(tgtCol), rate: num(rateCol), occupancy: asPct(occCol) };
+    return {
+      day,
+      date: dateCol ?? null,
+      revenue: num(revCol),
+      target: num(tgtCol),
+      rate: num(rateCol),
+      occupancy: asPct(occCol),
+    };
   });
+
+  // --- Room Types (case-insensitive + common synonyms)
+  const roomTypesNorm = (roomTypes || []).map((r) => ({
+    type:       pick(r, 'type', 'name', 'room type', 'roomtype') || 'Unknown',
+    available:  num(pick(r, 'available', 'Available', 'rooms available', 'available rooms', 'avail')),
+    sold:       num(pick(r, 'sold', 'Sold', 'rooms sold', 'sold rooms', 'occupied', 'booked')),
+    revenue:    num(pick(r, 'revenue', 'Revenue', 'room revenue', 'accommodation revenue', 'total revenue')),
+    rate:       num(pick(r, 'rate', 'Rate', 'arr', 'ARR', 'adr', 'ADR', 'arr/adr', 'avg rate', 'average rate')),
+    occupancy:  asPct(pick(r, 'occupancy', 'Occupancy', 'occ', 'Occ', 'occ%')),
+  }));
+
+  // --- History (unchanged, but tolerate caps)
+  const historyNorm = (history || []).map((h) => ({
+    year: String(pick(h, 'year', 'Year') ?? ''),
+    roomsSold: num(pick(h, 'roomsSold', 'rooms sold')),
+    occupancy: asPct(pick(h, 'occupancy', 'Occupancy')),
+    revenue: num(pick(h, 'revenue', 'Revenue')),
+    rate: num(pick(h, 'rate', 'avg rate', 'average rate')),
+  }));
+
+  // --- Overview summary with tolerant keys
+  const ovRevenue = num(pick(overview, 'revenueToDate', 'revenue to date', 'revenue'));
+  const ovTarget  = num(pick(overview, 'targetToDate', 'target to date', 'target'));
+  const ovArr     = num(pick(overview, 'averageRoomRate', 'avg rate', 'arr', 'adr', 'average rate'));
+  const ovOcc     = asPct(pick(overview, 'occupancyRate', 'occupancy'));
 
   return {
     overview: {
-      revenueToDate: num(overview.revenueToDate ?? overview.revenue ?? overview['revenue to date']),
-      targetToDate:  num(overview.targetToDate ?? overview.target ?? overview['target to date']),
-      averageRoomRate: num(overview.averageRoomRate ?? overview.arr ?? overview.adr ?? overview['avg rate']),
-      occupancyRate: asPct(overview.occupancyRate ?? overview.occupancy),
+      revenueToDate: ovRevenue,
+      targetToDate:  ovTarget,
+      averageRoomRate: ovArr,
+      occupancyRate: ovOcc,
       daily: dailyData,
-      roomTypes: (roomTypes || []).map((r) => ({
-        type: r.type || r.name || r['room type'] || 'Unknown',
-        available: num(r.available ?? r['rooms available'] ?? r['available rooms']),
-        sold: num(r.sold ?? r['rooms sold']),
-        revenue: num(r.revenue),
-        rate: num(r.rate ?? r.arr ?? r.adr ?? r['avg rate']),
-        occupancy: asPct(r.occupancy ?? r.occ),
-      })),
-      history: (history || []).map((h) => ({
-        year: String(h.year ?? h.Year ?? ''),
-        roomsSold: num(h.roomsSold ?? h['rooms sold']),
-        occupancy: asPct(h.occupancy ?? h.Occupancy),
-        revenue: num(h.revenue ?? h.Revenue),
-        rate: num(h.rate ?? h['avg rate']),
-      })),
+      roomTypes: roomTypesNorm,
+      history: historyNorm,
       lastUpdated: new Date().toISOString(),
     },
   };
 }
+
+/* ------------------------------ storage ------------------------------ */
 
 async function uploadToAdminBucket(key, json) {
   const url = process.env.ADMIN_BUCKET_PUT_URL;
