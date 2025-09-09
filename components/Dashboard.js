@@ -32,26 +32,26 @@ const asPercent = (v, d = 0) => {
   const n = num(v, d);
   return n <= 1.5 ? n * 100 : n;
 };
-/* ✅ Whole-rand currency (no cents) */
+/* Whole-rand currency (no cents) */
 const currency = (n) => `R${Math.round(num(n)).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
-/* ➕ Robust parser for lastUpdated (handles ISO with/without timezone or epoch) */
+/* ➕ Robust parser for lastUpdated (ISO with/without timezone or epoch) */
 const parseLastUpdated = (v) => {
   if (v == null || v === '') return null;
   const s = String(v).trim();
 
-  // epoch millis/seconds as string
+  // seconds or millis epoch
   if (/^\d+$/.test(s)) {
-    const n = Number(s);
+    const n = s.length === 10 ? Number(s) * 1000 : Number(s);
     const d = new Date(n);
     return Number.isNaN(d.valueOf()) ? null : d;
   }
 
-  // if the string lacks a timezone, assume UTC ('Z') so Safari/Edge don't bail
+  // If missing timezone, assume UTC for consistent parsing across browsers
   const hasTZ = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
   const d = new Date(hasTZ ? s : s + 'Z');
   return Number.isNaN(d.valueOf()) ? null : d;
@@ -86,7 +86,7 @@ function useMonthParam() {
   return { month, setMonth };
 }
 
-/* ------------------------------ Month switcher (visible text) ------------------------------ */
+/* ------------------------------ Month switcher ------------------------------ */
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
   const prev = () => {
@@ -400,11 +400,27 @@ const Dashboard = ({ overview }) => {
       if (alive) { setMonthOverview(null); setLoading(false); }
     })();
 
-  return () => { alive = false; };
+    return () => { alive = false; };
   }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
+
+  /* ---------- derived "Last Updated" text ---------- */
+  const lastUpdatedText = (() => {
+    const raw =
+      ov.lastUpdated ??
+      (typeof monthOverview === 'object' ? monthOverview?.lastUpdated : null) ??
+      (typeof overview === 'object' ? overview?.lastUpdated : null);
+    const d = parseLastUpdated(raw) || new Date();
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  })();
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
@@ -430,7 +446,7 @@ const Dashboard = ({ overview }) => {
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
-  /* ✅ ADR fallback chain: API value → weighted ADR → average of daily rates */
+  /* ADR fallback chain: API value → weighted ADR → avg of daily rates */
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
@@ -512,7 +528,7 @@ const Dashboard = ({ overview }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
         <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
-        {/* ✅ Use the computed ADR fallback */}
+        {/* Use the computed ADR fallback */}
         <MetricCard title="Average Room Rate" value={currency(averageRoomRateFinal)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
@@ -550,7 +566,7 @@ const Dashboard = ({ overview }) => {
 
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
-    const [asc, setAsc] = useState(false);
+    const [asc, setAsc] = useState(false); // <-- fixed: was "aconst"
     const [compact, setCompact] = useState(true);
 
     const sorted = useMemo(() => {
@@ -809,21 +825,7 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                {/* ➕ Show date & time, parsing robustly and falling back to "now" if missing */}
-                {(() => {
-                  const d = parseLastUpdated(ov.lastUpdated) || new Date();
-                  return (
-                    <p className="text-sm font-medium">
-                      {d.toLocaleString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  );
-                })()}
+                <p className="text-sm font-medium">{lastUpdatedText}</p>
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
