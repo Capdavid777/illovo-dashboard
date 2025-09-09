@@ -44,14 +44,14 @@ const parseLastUpdated = (v) => {
   if (v == null || v === '') return null;
   const s = String(v).trim();
 
-  // epoch millis/seconds as string
+  // epoch millis/seconds as string of digits
   if (/^\d+$/.test(s)) {
-    const n = Number(s);
+    const n = Number(s.length === 10 ? Number(s) * 1000 : Number(s));
     const d = new Date(n);
     return Number.isNaN(d.valueOf()) ? null : d;
   }
 
-  // if the string lacks a timezone, assume UTC ('Z') so Safari/Edge don't bail
+  // If string lacks timezone, assume UTC ('Z') so Safari/Edge don't bail
   const hasTZ = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
   const d = new Date(hasTZ ? s : s + 'Z');
   return Number.isNaN(d.valueOf()) ? null : d;
@@ -400,11 +400,27 @@ const Dashboard = ({ overview }) => {
       if (alive) { setMonthOverview(null); setLoading(false); }
     })();
 
-  return () => { alive = false; };
+    return () => { alive = false; };
   }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
+
+  /* ---------- derived "Last Updated" text (date + time, robust parsing) ---------- */
+  const lastUpdatedText = (() => {
+    const raw =
+      ov.lastUpdated ??
+      (typeof monthOverview === 'object' ? monthOverview?.lastUpdated : null) ??
+      (typeof overview === 'object' ? overview?.lastUpdated : null);
+    const d = parseLastUpdated(raw) || new Date();
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  })();
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
@@ -550,7 +566,7 @@ const Dashboard = ({ overview }) => {
 
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
-    const [asc, setAsc] = useState(false);
+    aconst [asc, setAsc] = useState(false);
     const [compact, setCompact] = useState(true);
 
     const sorted = useMemo(() => {
@@ -809,21 +825,7 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                {/* ➕ Show date & time, parsing robustly and falling back to "now" if missing */}
-                {(() => {
-                  const d = parseLastUpdated(ov.lastUpdated) || new Date();
-                  return (
-                    <p className="text-sm font-medium">
-                      {d.toLocaleString(undefined, {
-                        year: 'numeric',
-                        month: 'short',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  );
-                })()}
+                <p className="text-sm font-medium">{lastUpdatedText}</p>
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
