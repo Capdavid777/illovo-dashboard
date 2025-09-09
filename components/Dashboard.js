@@ -32,7 +32,8 @@ const asPercent = (v, d = 0) => {
   const n = num(v, d);
   return n <= 1.5 ? n * 100 : n;
 };
-const currency = (n) => `R${num(n).toLocaleString()}`;
+/* ✅ Whole-rand currency (no cents) */
+const currency = (n) => `R${Math.round(num(n)).toLocaleString()}`;
 const pct = (n) => `${Math.round(num(n))}%`;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
@@ -390,7 +391,7 @@ const Dashboard = ({ overview }) => {
       if (alive) { setMonthOverview(null); setLoading(false); }
     })();
 
-    return () => { alive = false; };
+  return () => { alive = false; };
   }, [month, inspectOn]);
 
   const rawForNormalize = monthOverview || overview || {};
@@ -419,6 +420,15 @@ const Dashboard = ({ overview }) => {
   const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
+
+  /* ✅ ADR fallback chain: API value → weighted ADR → average of daily rates */
+  const dailyRates = (ov.dailyData || [])
+    .map(d => num(d.rate, NaN))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
+  const averageRoomRateFinal = (ov.averageRoomRate && ov.averageRoomRate > 0)
+    ? Math.round(ov.averageRoomRate)
+    : (rtWeightedADR || dailyRateAvg || 0);
 
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
@@ -493,7 +503,8 @@ const Dashboard = ({ overview }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
         <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
-        <MetricCard title="Average Room Rate" value={currency(ov.averageRoomRate)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
+        {/* ✅ Use the computed ADR fallback */}
+        <MetricCard title="Average Room Rate" value={currency(averageRoomRateFinal)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
 
