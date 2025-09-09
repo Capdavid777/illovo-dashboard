@@ -39,6 +39,24 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
+/* ➕ Robust parser for lastUpdated (handles ISO with/without timezone or epoch) */
+const parseLastUpdated = (v) => {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+
+  // epoch millis/seconds as string
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    const d = new Date(n);
+    return Number.isNaN(d.valueOf()) ? null : d;
+  }
+
+  // if the string lacks a timezone, assume UTC ('Z') so Safari/Edge don't bail
+  const hasTZ = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
+  const d = new Date(hasTZ ? s : s + 'Z');
+  return Number.isNaN(d.valueOf()) ? null : d;
+};
+
 /* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
 const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
@@ -178,16 +196,13 @@ function mapDailyRow(d, i) {
 const get = (obj, keys, fallback) => { for (const k of keys) if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k]; return fallback; };
 
 function pickArrayForMonth(raw, monthKey, fieldNames) {
-  // Accept: direct array, { [monthKey]: [] }, or array with per-item 'month'/'period'/'monthKey'/'date'
   const rawField = get(raw, fieldNames, null);
   if (!rawField) return null;
 
-  // { [monthKey]: [...] }
   if (!Array.isArray(rawField) && typeof rawField === 'object') {
     if (Array.isArray(rawField[monthKey])) return rawField[monthKey];
   }
 
-  // direct array (maybe carries a month on the items)
   if (Array.isArray(rawField)) {
     const first = rawField[0];
     if (first && typeof first === 'object') {
@@ -196,9 +211,7 @@ function pickArrayForMonth(raw, monthKey, fieldNames) {
         const filtered = rawField.filter((r) => String(r[monthProp]) === monthKey);
         if (filtered.length) return filtered;
       }
-      // Allow date-based filtering if items have 'date'
       if ('date' in first) {
-        const m = monthKey.split('-').join('-');
         const filtered = rawField.filter((r) => {
           const d = r.date ? new Date(r.date) : null;
           return d && toKey(d) === monthKey;
@@ -206,7 +219,6 @@ function pickArrayForMonth(raw, monthKey, fieldNames) {
         if (filtered.length) return filtered;
       }
     }
-    // Otherwise we assume the array already belongs to the selected month
     return rawField;
   }
 
@@ -219,7 +231,7 @@ function totalsMismatch(roomTypesArr, overviewRevenue) {
   const sum = roomTypesArr.reduce((a, r) => a + num(r.revenue), 0);
   const A = Math.max(1, Math.abs(num(overviewRevenue)));
   const gap = Math.abs(sum - num(overviewRevenue));
-  return gap / A > 0.2; // >20% off looks like a different month
+  return gap / A > 0.2;
 }
 
 /* ------------------------------ normalization ------------------------------ */
@@ -233,19 +245,16 @@ function normalizeOverview(raw = {}) {
     return fallback;
   };
 
-  // Find daily array in whatever shape came back
   let dailyArr = sniffDailyArray(raw);
   if (!Array.isArray(dailyArr)) dailyArr = [];
   const dailyData = dailyArr.map((row, i) => mapDailyRow(row, i)).filter(Boolean);
 
-  // Pull summary values if present
   let revenueToDate   = num(get(['revenueToDate','revenue_to_date','revenue'], NaN));
   let targetToDate    = num(get(['targetToDate','target_to_date','target'], NaN));
   let averageRoomRate = num(get(['averageRoomRate','avgRoomRate','arr','adr'], NaN));
   let occupancyRate   = get(['occupancyRate','occupancy_to_date','occupancy'], undefined);
   occupancyRate = occupancyRate === undefined ? NaN : asPercent(occupancyRate);
 
-  // If the summary row is blank/0 but we have daily data, fall back to totals/averages
   const hasDaily = dailyData.length > 0;
   const hasAnyMoney = hasDaily && dailyData.some(d => num(d.revenue) > 0 || num(d.target) > 0);
 
@@ -800,9 +809,21 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                <p className="text-sm font-medium">
-                  {ov.lastUpdated ? new Date(ov.lastUpdated).toLocaleDateString() : new Date().toLocaleDateString()}
-                </p>
+                {/* ➕ Show date & time, parsing robustly and falling back to "now" if missing */}
+                {(() => {
+                  const d = parseLastUpdated(ov.lastUpdated) || new Date();
+                  return (
+                    <p className="text-sm font-medium">
+                      {d.toLocaleString(undefined, {
+                        year: 'numeric',
+                        month: 'short',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </p>
+                  );
+                })()}
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
