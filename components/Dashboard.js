@@ -291,6 +291,7 @@ function normalizeOverview(raw = {}) {
     history: Array.isArray(historyRaw) ? historyRaw : null,
   };
 }
+
 /* ------------------------------ palettes ------------------------------ */
 
 const ROOM_PALETTES = {
@@ -302,6 +303,17 @@ const ROOM_PALETTES = {
 };
 const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
 const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+/* ------------------------------ NEW: month-level targets ------------------------------ */
+/** Keep month targets here; falls back to `default` when a key is missing. */
+const TARGETS = {
+  default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined }, // historic defaults (Aug)
+  "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined }, // September targets
+};
+
+function getTargetsForMonth(monthKey) {
+  return TARGETS[monthKey] || TARGETS.default;
+}
 
 /* ------------------------------ component ------------------------------ */
 
@@ -492,9 +504,13 @@ const Dashboard = ({ overview }) => {
     { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
   ];
 
-  const breakevenRate = 1237;
+  /* NEW: resolve month targets */
+  const monthTargets = getTargetsForMonth(month);
+  const OCC_TARGET = num(monthTargets.occupancyPct, 62);
+  const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
+
   const revenueProgressPct   = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
-  const occupancyTargetPct   = 62;
+  const occupancyTargetPct   = OCC_TARGET;
   const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
 
   /* ------------------------------ UI bits ------------------------------ */
@@ -557,8 +573,8 @@ const Dashboard = ({ overview }) => {
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
-        <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(62)} target`} icon={Users} />
-        <MetricCard title="Average Room Rate" value={currency(averageRoomRateFinal)} subtitle={`vs breakeven ${currency(breakevenRate)}`} icon={Home} />
+        <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(OCC_TARGET)} target`} icon={Users} />
+        <MetricCard title="Average Room Rate" value={currency(averageRoomRateFinal)} subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`} icon={Home} />
         <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
       </div>
 
