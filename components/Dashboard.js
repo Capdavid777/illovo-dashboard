@@ -38,9 +38,11 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
-/* ✅ Robust parser for lastUpdated */
+/* ✅ Robust parser for lastUpdated (ISO with/without TZ, epoch sec/ms, or Date) */
 const parseLastUpdated = (v) => {
   if (v == null || v === '') return null;
+  if (v instanceof Date) return Number.isNaN(v.valueOf()) ? null : v;
+
   const s = String(v).trim();
 
   // epoch seconds/millis
@@ -50,7 +52,7 @@ const parseLastUpdated = (v) => {
     return Number.isNaN(d.valueOf()) ? null : d;
   }
 
-  // Add Z if no timezone given (Safari-safe)
+  // add Z if no timezone given (Safari-safe)
   const hasTZ = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
   const d = new Date(hasTZ ? s : s + 'Z');
   return Number.isNaN(d.valueOf()) ? null : d;
@@ -313,6 +315,8 @@ const Dashboard = ({ overview }) => {
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
 
+  const [lastUpdatedStr, setLastUpdatedStr] = useState(''); // <-- always show something
+
   const debugOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
@@ -405,23 +409,49 @@ const Dashboard = ({ overview }) => {
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
 
-  /* ---------- Last Updated text (always shows something) ---------- */
-  const lastUpdatedText = (() => {
-    const raw =
-      ov.lastUpdated ??
-      (typeof monthOverview === 'object' ? monthOverview?.lastUpdated : null) ??
-      (typeof overview === 'object' ? overview?.lastUpdated : null) ??
-      // in case a future response keeps it at top-level with nested overview:
-      (overview && overview.overview ? overview.overview.lastUpdated : null);
-    const d = parseLastUpdated(raw) || new Date();
-    return d.toLocaleString(undefined, {
+  /* ---------- "Last Updated" string (post-mount, with multiple fallbacks) ---------- */
+  useEffect(() => {
+    // candidates: explicit timestamp fields
+    let d =
+      parseLastUpdated(ov?.lastUpdated) ||
+      parseLastUpdated(monthOverview?.lastUpdated) ||
+      parseLastUpdated(overview?.lastUpdated);
+
+    // fallback: try latest daily date or latest day number within current month
+    if (!d && Array.isArray(ov?.dailyData) && ov.dailyData.length) {
+      let best = null;
+
+      // prefer actual ISO dates if present
+      for (const r of ov.dailyData) {
+        if (r?.date) {
+          const dd = parseLastUpdated(r.date);
+          if (dd && (!best || dd > best)) best = dd;
+        }
+      }
+
+      // otherwise use latest "day" field in selected month
+      if (!best) {
+        const lastDay = ov.dailyData.reduce((a, r) => Math.max(a, num(r.day, 0)), 0);
+        if (lastDay > 0) {
+          const [y, m] = month.split('-').map(n => parseInt(n, 10));
+          best = new Date(y, (m || 1) - 1, lastDay, 23, 59, 0);
+        }
+      }
+      d = best;
+    }
+
+    if (!d) d = new Date(); // final fallback
+
+    const str = new Intl.DateTimeFormat(undefined, {
       year: 'numeric',
       month: 'short',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit'
-    });
-  })();
+    }).format(d);
+
+    setLastUpdatedStr(str);
+  }, [ov?.lastUpdated, ov?.dailyData, month, monthOverview?.lastUpdated, overview?.lastUpdated]);
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
@@ -824,8 +854,8 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                <p className="text-sm font-medium" title={ov.lastUpdated || ''}>
-                  {lastUpdatedText || '—'}
+                <p className="text-sm font-medium text-gray-900" title={ov?.lastUpdated || ''}>
+                  {lastUpdatedStr || '—'}
                 </p>
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
