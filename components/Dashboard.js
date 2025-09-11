@@ -53,6 +53,10 @@ const parseLastUpdated = (v) => {
   return Number.isNaN(d.valueOf()) ? null : d;
 };
 
+/* ------------------------------ arrears setting ------------------------------ */
+// Data arrives 1 day in arrears (set to 0 if your feed becomes same-day)
+const ARREARS_DAYS = 1;
+
 /* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
 const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
@@ -147,7 +151,7 @@ function sniffDailyArray(raw) {
   for (const v of Object.values(raw)) {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       for (const vv of Object.values(v)) {
-        if (Array.isArray(vv) && v.length <= 40 && vv.every((x) => x && typeof x === 'object')) candidates.push(vv);
+        if (Array.isArray(vv) && vv.length >= 10 && vv.every((x) => x && typeof x === 'object')) candidates.push(vv);
       }
     }
   }
@@ -269,13 +273,16 @@ function getTargetsForMonth(monthKey) {
 }
 
 /* ------------------------------ Occupancy to-date (weighted) ------------------------------ */
-function computeOccToDatePct(dailyRows, today = new Date(), fallbackRoomsPerDay = 60) {
+// NOTE: now takes a "cutoff" date so we can honor arrears (e.g., yesterday 23:59:59)
+function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay = 60) {
   if (!Array.isArray(dailyRows) || dailyRows.length === 0) return 0;
+
   const rowsToDate = dailyRows.filter(r => {
     if (r?.date) {
       const d = new Date(r.date);
-      return !Number.isNaN(d.valueOf()) && d <= today;
+      return !Number.isNaN(d.valueOf()) && d <= cutoff;
     }
+    // if only numeric days exist we keep them (assumed ≤ cutoff)
     return Number.isFinite(r?.day);
   });
 
@@ -524,19 +531,29 @@ const Dashboard = ({ overview }) => {
   const OCC_TARGET = num(monthTargets.occupancyPct, 62);
   const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
 
-  // ✅ Occupancy to-date (weighted)
-  const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData), [ov.dailyData]);
+  // --- cutoff for to-date metrics (arrears-aware)
+  const cutoffDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - ARREARS_DAYS);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }, []);
 
-  // MTD days chip (used on Revenue + Occupancy tiles)
+  // ✅ Occupancy to-date (weighted) using cutoff
+  const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
+
+  // ✅ MTD days chip using the same cutoff
   const elapsedDays = useMemo(() => {
     if (!Array.isArray(ov.dailyData) || ov.dailyData.length === 0) return 0;
-    const today = new Date();
-    const count = ov.dailyData.filter(r => {
-      if (r?.date) { const d = new Date(r.date); return !Number.isNaN(d.valueOf()) && d <= today; }
+    return ov.dailyData.filter(r => {
+      if (r?.date) {
+        const d = new Date(r.date);
+        return !Number.isNaN(d.valueOf()) && d <= cutoffDate;
+      }
       return Number.isFinite(r?.day);
     }).length;
-    return count;
-  }, [ov.dailyData]);
+  }, [ov.dailyData, cutoffDate]);
+
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
@@ -610,7 +627,7 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* ✅ Revenue tile: MTD chip + progress ring vs target (marker at 100%) */}
+        {/* Revenue tile: MTD chip + progress ring vs target (marker at 100%) */}
         <MetricCard
           title="Revenue to Date"
           value={currency(ov.revenueToDate)}
@@ -620,7 +637,7 @@ const Dashboard = ({ overview }) => {
           rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
         />
 
-        {/* ✅ Occupancy tile: weighted to-date + MTD chip + progress ring vs OCC_TARGET */}
+        {/* Occupancy tile: weighted to-date + MTD chip + progress ring vs OCC_TARGET */}
         <MetricCard
           title="Occupancy Rate"
           value={pct(occToDatePct)}
@@ -688,7 +705,7 @@ const Dashboard = ({ overview }) => {
         sold: (r) => num(r.sold),
       };
       const keyFn = keyMap[sortBy] || keyMap.revenue;
-      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a)).slice(0, undefined).map(x=>x); // stable enough
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a)).slice(0, undefined).map(x=>x);
     }, [roomTypeData, sortBy]);
 
     useEffect(()=>{ if (asc) sorted.reverse(); }, [asc]); // small toggle without re-sorting
@@ -900,27 +917,22 @@ const Dashboard = ({ overview }) => {
 
   const Inspector = () => {
     if (!inspectOn) return null;
-    const dailySum = ov.dailyData.reduce((a, d) => a + num(d.revenue), 0);
-    const targetSum = ov.dailyData.reduce((a, d) => a + num(d.target), 0);
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
           <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle)</div>
           {rawSlice && (
             <>
-              <div><b>Raw slice ({rawSlice.tag}):</b></div>
+              <div><b>Raw slice:</b></div>
               <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
             </>
           )}
-          <div><b>Normalization summary:</b></div>
+          <div><b>Derived:</b></div>
           <pre className="overflow-auto">{JSON.stringify({
             month,
-            dailyRows: ov.dailyData.length,
-            revenueToDate: ov.revenueToDate,
-            targetToDate: ov.targetToDate,
-            occupancy_toDate_pct: Math.round(occToDatePct),
             elapsedDays,
             totalDays,
+            occToDatePct: Math.round(occToDatePct),
             revenueProgressPct
           }, null, 2)}</pre>
         </div>
@@ -945,7 +957,7 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                <p className="text-sm font-medium text-gray-900" title={ov?.lastUpdated || ''}>
+                <p className="text-sm font-medium text-gray-900">
                   {lastUpdatedStr || '—'}
                 </p>
                 {sourceInfo && (
@@ -965,14 +977,6 @@ const Dashboard = ({ overview }) => {
           )}
         </div>
       </div>
-
-      {debugOn && sourceInfo && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-          <pre className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 overflow-auto">
-            {JSON.stringify(sourceInfo, null, 2)}
-          </pre>
-        </div>
-      )}
 
       <Inspector />
 
