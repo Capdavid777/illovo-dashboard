@@ -38,21 +38,16 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
-/* ✅ Robust parser for lastUpdated (ISO with/without TZ, epoch sec/ms, or Date) */
+/* parse lastUpdated robustly */
 const parseLastUpdated = (v) => {
   if (v == null || v === '') return null;
   if (v instanceof Date) return Number.isNaN(v.valueOf()) ? null : v;
-
   const s = String(v).trim();
-
-  // epoch seconds/millis
   if (/^\d+$/.test(s)) {
     const n = s.length === 10 ? Number(s) * 1000 : Number(s);
     const d = new Date(n);
     return Number.isNaN(d.valueOf()) ? null : d;
   }
-
-  // add Z if no timezone given (Safari-safe)
   const hasTZ = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
   const d = new Date(hasTZ ? s : s + 'Z');
   return Number.isNaN(d.valueOf()) ? null : d;
@@ -87,6 +82,11 @@ function useMonthParam() {
   return { month, setMonth };
 }
 
+const daysInMonth = (monthKey) => {
+  const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
+  return new Date(y, m, 0).getDate();
+};
+
 /* ------------------------------ Month switcher ------------------------------ */
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
@@ -104,9 +104,7 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
     const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
     const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
     const cur = new Date(start);
-    while (cur <= end) {
-      out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1);
-    }
+    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
     return out.reverse();
   })();
 
@@ -149,7 +147,7 @@ function sniffDailyArray(raw) {
   for (const v of Object.values(raw)) {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       for (const vv of Object.values(v)) {
-        if (Array.isArray(vv) && vv.length >= 10 && vv.length <= 40 && vv.every((x) => x && typeof x === 'object')) candidates.push(vv);
+        if (Array.isArray(vv) && v.length <= 40 && vv.every((x) => x && typeof x === 'object')) candidates.push(vv);
       }
     }
   }
@@ -190,49 +188,6 @@ function mapDailyRow(d, i) {
     occupancy: Number.isFinite(occupancy) ? occupancy : 0,
     met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
   };
-}
-
-/* ------------------------------ month-aware selectors ------------------------------ */
-
-const get = (obj, keys, fallback) => { for (const k of keys) if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k]; return fallback; };
-
-function pickArrayForMonth(raw, monthKey, fieldNames) {
-  const rawField = get(raw, fieldNames, null);
-  if (!rawField) return null;
-
-  if (!Array.isArray(rawField) && typeof rawField === 'object') {
-    if (Array.isArray(rawField[monthKey])) return rawField[monthKey];
-  }
-
-  if (Array.isArray(rawField)) {
-    const first = rawField[0];
-    if (first && typeof first === 'object') {
-      const monthProp = ['month', 'period', 'monthKey'].find((p) => p in first);
-      if (monthProp) {
-        const filtered = rawField.filter((r) => String(r[monthProp]) === monthKey);
-        if (filtered.length) return filtered;
-      }
-      if ('date' in first) {
-        const filtered = rawField.filter((r) => {
-          const d = r.date ? new Date(r.date) : null;
-          return d && toKey(d) === monthKey;
-        });
-        if (filtered.length) return filtered;
-      }
-    }
-    return rawField;
-  }
-
-  return null;
-}
-
-/* If room-types totals diverge too far from overview revenue, treat them as stale and ignore. */
-function totalsMismatch(roomTypesArr, overviewRevenue) {
-  if (!Array.isArray(roomTypesArr) || roomTypesArr.length === 0) return true;
-  const sum = roomTypesArr.reduce((a, r) => a + num(r.revenue), 0);
-  const A = Math.max(1, Math.abs(num(overviewRevenue)));
-  const gap = Math.abs(sum - num(overviewRevenue));
-  return gap / A > 0.2;
 }
 
 /* ------------------------------ normalization ------------------------------ */
@@ -284,8 +239,8 @@ function normalizeOverview(raw = {}) {
     targetToDate:  Number.isFinite(targetToDate) ? targetToDate : 0,
     averageRoomRate,
     occupancyRate: Number.isFinite(occupancyRate) ? occupancyRate : 0,
-    targetVariance,
     dailyData,
+    targetVariance,
     lastUpdated,
     roomTypes: Array.isArray(roomTypesRaw) ? roomTypesRaw : null,
     history: Array.isArray(historyRaw) ? historyRaw : null,
@@ -304,15 +259,89 @@ const ROOM_PALETTES = {
 const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
 const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
-/* ------------------------------ NEW: month-level targets ------------------------------ */
-/** Keep month targets here; falls back to `default` when a key is missing. */
+/* ------------------------------ Month targets ------------------------------ */
 const TARGETS = {
-  default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined }, // historic defaults (Aug)
-  "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined }, // September targets
+  default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
+  "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
 };
-
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
+}
+
+/* ------------------------------ Occupancy to-date (weighted) ------------------------------ */
+function computeOccToDatePct(dailyRows, today = new Date(), fallbackRoomsPerDay = 60) {
+  if (!Array.isArray(dailyRows) || dailyRows.length === 0) return 0;
+  const rowsToDate = dailyRows.filter(r => {
+    if (r?.date) {
+      const d = new Date(r.date);
+      return !Number.isNaN(d.valueOf()) && d <= today;
+    }
+    return Number.isFinite(r?.day);
+  });
+
+  let soldSum = 0;
+  let availSum = 0;
+
+  for (const r of rowsToDate) {
+    const rate = num(r.rate, 0);
+    const rev  = num(r.revenue, 0);
+    const occP = num(r.occupancy, 0); // percent (0–100)
+
+    const sold = rate > 0 ? (rev / rate) : 0; // room nights sold
+    let avail = 0;
+
+    if (occP > 0 && sold > 0) {
+      avail = sold / (occP / 100);
+    } else if (occP > 0 || sold > 0) {
+      avail = fallbackRoomsPerDay;
+    } else {
+      avail = fallbackRoomsPerDay;
+    }
+
+    soldSum += sold;
+    availSum += avail;
+  }
+
+  if (availSum <= 0) return 0;
+  return (soldSum / availSum) * 100;
+}
+
+/* ------------------------------ Progress Ring ------------------------------ */
+
+function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
+  const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  const t = Math.max(0, Math.min(100, Number(target) || 0));
+
+  const radius = (size - stroke) / 2;
+  const c = 2 * Math.PI * radius;
+  const dash = (p / 100) * c;
+
+  // position target marker on circumference
+  const angle = (t / 100) * 2 * Math.PI - Math.PI / 2; // start at top
+  const cx = size / 2 + radius * Math.cos(angle);
+  const cy = size / 2 + radius * Math.sin(angle);
+
+  const met = p >= t;
+  const progColor = met ? '#10B981' : '#EF4444';
+
+  return (
+    <svg width={size} height={size} aria-label={label || 'progress'}>
+      {/* track */}
+      <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={stroke} />
+      {/* progress */}
+      <circle
+        cx={size/2} cy={size/2} r={radius} fill="none"
+        stroke={progColor} strokeWidth={stroke} strokeLinecap="round"
+        strokeDasharray={`${dash} ${c - dash}`} transform={`rotate(-90 ${size/2} ${size/2})`}
+      />
+      {/* target marker */}
+      <circle cx={cx} cy={cy} r={3.2} fill="#000" />
+      {/* center text */}
+      <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="12" fontWeight="600" fill="#111">
+        {Math.round(p)}%
+      </text>
+    </svg>
+  );
 }
 
 /* ------------------------------ component ------------------------------ */
@@ -326,9 +355,9 @@ const Dashboard = ({ overview }) => {
   const [selectedView, setSelectedView] = useState('overview');
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
+  const [lastUpdatedStr, setLastUpdatedStr] = useState('');
 
-  const [lastUpdatedStr, setLastUpdatedStr] = useState(''); // <-- always show something
-
+  /* toggles */
   const debugOn = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
@@ -338,6 +367,7 @@ const Dashboard = ({ overview }) => {
     try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
   })();
 
+  /* fetch bounds */
   useEffect(() => {
     let alive = true;
     fetch('/data/index.json').then(r => r.ok ? r.json() : null).then((j) => {
@@ -349,6 +379,7 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* fetch month data (multi-source) */
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -418,30 +449,25 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, [month, inspectOn]);
 
+  /* normalize */
   const rawForNormalize = monthOverview || overview || {};
   const ov = useMemo(() => normalizeOverview(rawForNormalize, month), [rawForNormalize, month]);
 
-  /* ---------- "Last Updated" string (post-mount, with multiple fallbacks) ---------- */
+  /* last updated text */
   useEffect(() => {
-    // candidates: explicit timestamp fields
     let d =
       parseLastUpdated(ov?.lastUpdated) ||
       parseLastUpdated(monthOverview?.lastUpdated) ||
       parseLastUpdated(overview?.lastUpdated);
 
-    // fallback: try latest daily date or latest day number within current month
     if (!d && Array.isArray(ov?.dailyData) && ov.dailyData.length) {
       let best = null;
-
-      // prefer actual ISO dates if present
       for (const r of ov.dailyData) {
         if (r?.date) {
           const dd = parseLastUpdated(r.date);
           if (dd && (!best || dd > best)) best = dd;
         }
       }
-
-      // otherwise use latest "day" field in selected month
       if (!best) {
         const lastDay = ov.dailyData.reduce((a, r) => Math.max(a, num(r.day, 0)), 0);
         if (lastDay > 0) {
@@ -451,22 +477,17 @@ const Dashboard = ({ overview }) => {
       }
       d = best;
     }
-
-    if (!d) d = new Date(); // final fallback
+    if (!d) d = new Date();
 
     const str = new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
+      year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit'
     }).format(d);
-
     setLastUpdatedStr(str);
   }, [ov?.lastUpdated, ov?.dailyData, month, monthOverview?.lastUpdated, overview?.lastUpdated]);
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
+  // Room types (fallback if none provided)
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
@@ -489,6 +510,7 @@ const Dashboard = ({ overview }) => {
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
+  // ADR fallback from daily
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
@@ -497,34 +519,50 @@ const Dashboard = ({ overview }) => {
     ? Math.round(ov.averageRoomRate)
     : (rtWeightedADR || dailyRateAvg || 0);
 
-  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
-    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
-    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
-    { year: '2024', roomsSold: 759, occupancy: 45, revenue: 701738, rate: 925 },
-    { year: '2025', roomsSold: 569, occupancy: 46, revenue: 593854, rate: 1042 }
-  ];
-
-  /* NEW: resolve month targets */
+  // targets
   const monthTargets = getTargetsForMonth(month);
   const OCC_TARGET = num(monthTargets.occupancyPct, 62);
   const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
 
-  const revenueProgressPct   = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
-  const occupancyTargetPct   = OCC_TARGET;
-  const occupancyProgressPct = Math.round(100 * clamp01(ov.occupancyRate / occupancyTargetPct));
+  // ✅ Occupancy to-date (weighted)
+  const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData), [ov.dailyData]);
+
+  // MTD days chip (used on Revenue + Occupancy tiles)
+  const elapsedDays = useMemo(() => {
+    if (!Array.isArray(ov.dailyData) || ov.dailyData.length === 0) return 0;
+    const today = new Date();
+    const count = ov.dailyData.filter(r => {
+      if (r?.date) { const d = new Date(r.date); return !Number.isNaN(d.valueOf()) && d <= today; }
+      return Number.isFinite(r?.day);
+    }).length;
+    return count;
+  }, [ov.dailyData]);
+  const totalDays = daysInMonth(month);
+  const mtdChip = `${elapsedDays}/${totalDays} days`;
+
+  // Revenue progress vs target (100% = target met)
+  const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
 
   /* ------------------------------ UI bits ------------------------------ */
 
-  const MetricCard = ({ title, value, subtitle, icon: Icon }) => (
+  // allow a custom right-side slot (e.g., progress ring)
+  const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot }) => (
     <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
-      <div className="flex items-center justify-between p-6">
+      <div className="flex items-start justify-between p-6">
         <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-gray-600">{title}</p>
+            {chip && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#CBA135]/40 text-[#111] bg-[#CBA135]/10">
+                {chip}
+              </span>
+            )}
+          </div>
           <p className="text-2xl font-bold text-gray-900">{value}</p>
           {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
         </div>
-        <div className="p-3 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30">
-          <Icon className="w-6 h-6" />
+        <div className="p-2 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30 flex items-center justify-center">
+          {rightSlot ? rightSlot : <Icon className="w-6 h-6" />}
         </div>
       </div>
     </div>
@@ -572,10 +610,38 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard title="Revenue to Date" value={currency(ov.revenueToDate)} subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined} icon={DollarSign} />
-        <MetricCard title="Occupancy Rate" value={pct(ov.occupancyRate)} subtitle={`vs ${pct(OCC_TARGET)} target`} icon={Users} />
-        <MetricCard title="Average Room Rate" value={currency(averageRoomRateFinal)} subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`} icon={Home} />
-        <MetricCard title="Target Variance" value={currency(Math.abs(ov.targetVariance))} subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'} icon={Target} />
+        {/* ✅ Revenue tile: MTD chip + progress ring vs target (marker at 100%) */}
+        <MetricCard
+          title="Revenue to Date"
+          value={currency(ov.revenueToDate)}
+          subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
+          icon={DollarSign}
+          chip={mtdChip}
+          rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
+        />
+
+        {/* ✅ Occupancy tile: weighted to-date + MTD chip + progress ring vs OCC_TARGET */}
+        <MetricCard
+          title="Occupancy Rate"
+          value={pct(occToDatePct)}
+          subtitle={`vs ${pct(OCC_TARGET)} target`}
+          icon={Users}
+          chip={mtdChip}
+          rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
+        />
+
+        <MetricCard
+          title="Average Room Rate"
+          value={currency(averageRoomRateFinal)}
+          subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`}
+          icon={Home}
+        />
+        <MetricCard
+          title="Target Variance"
+          value={currency(Math.abs(ov.targetVariance))}
+          subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
+          icon={Target}
+        />
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
@@ -622,9 +688,10 @@ const Dashboard = ({ overview }) => {
         sold: (r) => num(r.sold),
       };
       const keyFn = keyMap[sortBy] || keyMap.revenue;
-      const arr = [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
-      return asc ? arr.reverse() : arr;
-    }, [roomTypeData, sortBy, asc]);
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a)).slice(0, undefined).map(x=>x); // stable enough
+    }, [roomTypeData, sortBy]);
+
+    useEffect(()=>{ if (asc) sorted.reverse(); }, [asc]); // small toggle without re-sorting
 
     return (
       <div className="space-y-8">
@@ -758,6 +825,13 @@ const Dashboard = ({ overview }) => {
     );
   };
 
+  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
+    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
+    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
+    { year: '2024', roomsSold: 759,  occupancy: 45, revenue: 701738,  rate: 925  },
+    { year: '2025', roomsSold: 569,  occupancy: 46, revenue: 593854,  rate: 1042 }
+  ];
+
   const HistoricalView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -822,7 +896,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------ layout & debug ------------------------------ */
+  /* ------------------------------ debug / framing ------------------------------ */
 
   const Inspector = () => {
     if (!inspectOn) return null;
@@ -842,11 +916,12 @@ const Dashboard = ({ overview }) => {
           <pre className="overflow-auto">{JSON.stringify({
             month,
             dailyRows: ov.dailyData.length,
-            dailySumRevenue: dailySum,
-            dailySumTarget: targetSum,
             revenueToDate: ov.revenueToDate,
             targetToDate: ov.targetToDate,
-            occupancyRate: ov.occupancyRate,
+            occupancy_toDate_pct: Math.round(occToDatePct),
+            elapsedDays,
+            totalDays,
+            revenueProgressPct
           }, null, 2)}</pre>
         </div>
       </div>
