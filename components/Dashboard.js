@@ -542,23 +542,33 @@ const Dashboard = ({ overview }) => {
     });
   }, [ov.dailyData, cutoffDate]);
 
-  // ----- ADR from Daily tab: revenue-to-date ÷ room nights sold-to-date -----
+  // ----- ARR (Average Room Rate) from Daily tab -----
+  // We follow the spreadsheet logic: **simple mean of the daily ARR values to date**.
+  const arrRatesMTD = mtdRows
+    .map(d => num(d.rate, NaN))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const arrMeanMTD = arrRatesMTD.length
+    ? Math.round(arrRatesMTD.reduce((a,b)=>a+b,0) / arrRatesMTD.length)
+    : 0;
+
+  // (kept as a fallback / sanity check) Weighted ADR = Revenue ÷ Room-nights sold
   const revSumMTD   = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
   const nightsSumMTD = mtdRows.reduce((a, d) => {
     const rate = num(d.rate, 0);
     const rev  = num(d.revenue, 0);
     return a + (rate > 0 ? (rev / rate) : 0);
   }, 0);
-  const adrFromDaily = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
+  const arrWeightedMTD = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
 
-  // Fallback chain (if Daily is missing)
+  // Fallback if Daily is missing
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
   const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
 
+  // Final ADR prioritizes the Daily sheet's mean-of-ARR (matches your spreadsheet total)
   const averageRoomRateFinal =
-    adrFromDaily || Math.round(num(ov.averageRoomRate)) || dailyRateAvg || 0;
+    arrMeanMTD || arrWeightedMTD || Math.round(num(ov.averageRoomRate)) || dailyRateAvg || 0;
 
   // targets
   const monthTargets = getTargetsForMonth(month);
@@ -643,7 +653,7 @@ const Dashboard = ({ overview }) => {
           tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
         />
 
-        {/* ADR */}
+        {/* ARR (mean of daily ARR values) */}
         <MetricCard
           title="Average Room Rate"
           value={currency(averageRoomRateFinal)}
@@ -651,7 +661,7 @@ const Dashboard = ({ overview }) => {
           icon={Home}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
-          tooltip="ADR = Revenue MTD ÷ Room-nights sold MTD (from Daily sheet), cutoff: yesterday 23:59."
+          tooltip="ARR = simple average of Daily tab's ARR values to date (matches spreadsheet)."
         />
 
         {/* Target Variance */}
@@ -972,7 +982,8 @@ const Dashboard = ({ overview }) => {
             occToDatePct: Math.round(occToDatePct),
             revenueProgressPct,
             rateProgressPct,
-            adrFromDaily
+            arrMeanMTD,
+            arrWeightedMTD
           }, null, 2)}</pre>
         </div>
       </div>
