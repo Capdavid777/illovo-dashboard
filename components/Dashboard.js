@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import {
   Activity, Calendar, DollarSign, Home, Target, Users,
-  ArrowUpDown, SlidersHorizontal
+  ArrowUpDown, SlidersHorizontal, Info
 } from 'lucide-react';
 
 /* ------------------------------ helpers ------------------------------ */
@@ -54,7 +54,11 @@ const parseLastUpdated = (v) => {
 };
 
 /* ------------------------------ arrears setting ------------------------------ */
-const ARREARS_DAYS = 1;
+// You can override in .env.local: NEXT_PUBLIC_ARREARS_DAYS=1
+const ARREARS_DAYS = (() => {
+  const v = typeof process !== 'undefined' ? Number(process.env.NEXT_PUBLIC_ARREARS_DAYS) : NaN;
+  return Number.isFinite(v) ? v : 1;
+})();
 
 /* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -348,6 +352,37 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
   );
 }
 
+/* ------------------------------ Metric card ------------------------------ */
+
+const InfoTip = ({ children }) => (
+  <span className="inline-flex items-center gap-1 text-gray-500" title={children}>
+    <Info className="w-3.5 h-3.5" />
+  </span>
+);
+
+const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, tooltip }) => (
+  <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
+    <div className="flex items-start justify-between p-6">
+      <div>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-gray-600">{title}</p>
+          {tooltip && <InfoTip>{tooltip}</InfoTip>}
+          {chip && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#CBA135]/40 text-[#111] bg-[#CBA135]/10">
+              {chip}
+            </span>
+          )}
+        </div>
+        <p className="text-2xl font-bold text-gray-900">{value}</p>
+        {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+      </div>
+      <div className="p-2 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30 flex items-center justify-center">
+        {rightSlot ? rightSlot : <Icon className="w-6 h-6" />}
+      </div>
+    </div>
+  </div>
+);
+
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
@@ -362,14 +397,11 @@ const Dashboard = ({ overview }) => {
   const [lastUpdatedStr, setLastUpdatedStr] = useState('');
 
   /* toggles */
-  const debugOn = (() => {
-    if (typeof window === 'undefined') return false;
-    try { return new URL(window.location.href).searchParams.get('debug') === '1'; } catch { return false; }
-  })();
-  const inspectOn = (() => {
+  const inspectOnQuery = (() => {
     if (typeof window === 'undefined') return false;
     try { return new URL(window.location.href).searchParams.get('inspect') === '1'; } catch { return false; }
   })();
+  const showInspector = (process.env.NODE_ENV !== 'production') && inspectOnQuery;
 
   /* fetch bounds */
   useEffect(() => {
@@ -396,7 +428,7 @@ const Dashboard = ({ overview }) => {
       const r = await fetch(url, { cache: 'no-store', credentials: 'include', redirect: 'follow' });
       if (r.ok && isJson(r)) {
         const j = await r.json();
-        if (inspectOn && !rawSlice) {
+        if (showInspector && !rawSlice) {
           const slice = Array.isArray(j) ? j.slice(0, 3) : (typeof j === 'object' ? Object.fromEntries(Object.entries(j).slice(0, 20)) : j);
           setRawSlice({ tag, slice });
         }
@@ -451,7 +483,7 @@ const Dashboard = ({ overview }) => {
     })();
 
     return () => { alive = false; };
-  }, [month, inspectOn]);
+  }, [month, showInspector]);
 
   /* normalize */
   const rawForNormalize = monthOverview || overview || {};
@@ -491,29 +523,6 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
-  // Room types (fallback if none provided)
-  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
-    { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
-    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
-    { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
-    { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
-  ];
-  const roomTypeData = roomTypeRaw.map((rt) => {
-    const available = num(rt.available, null);
-    const sold      = num(rt.sold, null);
-    const revenue   = num(rt.revenue, 0);
-    const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
-    const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
-    const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
-    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
-  });
-
-  const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
-  const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
-  const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
-  const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
-  const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
-
   // ----- MTD cutoff (arrears-aware) -----
   const cutoffDate = useMemo(() => {
     const d = new Date();
@@ -540,16 +549,16 @@ const Dashboard = ({ overview }) => {
     const rev  = num(d.revenue, 0);
     return a + (rate > 0 ? (rev / rate) : 0);
   }, 0);
-  const arrFromDaily = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
+  const adrFromDaily = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
 
-  // ADR fallback chain (room types -> daily avg -> provided)
+  // Fallback chain (if Daily is missing)
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
   const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
 
-  // Final ADR prioritizes Daily-sheet computation
-  const averageRoomRateFinal = arrFromDaily || (rtWeightedADR || dailyRateAvg || Math.round(ov.averageRoomRate) || 0);
+  const averageRoomRateFinal =
+    adrFromDaily || Math.round(num(ov.averageRoomRate)) || dailyRateAvg || 0;
 
   // targets
   const monthTargets = getTargetsForMonth(month);
@@ -560,7 +569,7 @@ const Dashboard = ({ overview }) => {
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
   // MTD days chip
-  const elapsedDays = useMemo(() => mtdRows.length, [mtdRows]);
+  const elapsedDays = mtdRows.length;
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
@@ -568,29 +577,7 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ------------------------------ UI bits ------------------------------ */
-
-  const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot }) => (
-    <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
-      <div className="flex items-start justify-between p-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-gray-600">{title}</p>
-            {chip && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#CBA135]/40 text-[#111] bg-[#CBA135]/10">
-                {chip}
-              </span>
-            )}
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-          {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
-        </div>
-        <div className="p-2 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30 flex items-center justify-center">
-          {rightSlot ? rightSlot : <Icon className="w-6 h-6" />}
-        </div>
-      </div>
-    </div>
-  );
+  /* ------------------------------ charts helpers ------------------------------ */
 
   const LegendSwatch = ({ type }) => (
     <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2,
@@ -634,7 +621,7 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Revenue tile: MTD chip + progress ring vs target (marker at 100%) */}
+        {/* Revenue */}
         <MetricCard
           title="Revenue to Date"
           value={currency(ov.revenueToDate)}
@@ -642,9 +629,10 @@ const Dashboard = ({ overview }) => {
           icon={DollarSign}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
+          tooltip="Completion vs daily target (to date)."
         />
 
-        {/* Occupancy tile: weighted to-date + MTD chip + progress ring vs OCC_TARGET */}
+        {/* Occupancy */}
         <MetricCard
           title="Occupancy Rate"
           value={pct(occToDatePct)}
@@ -652,9 +640,10 @@ const Dashboard = ({ overview }) => {
           icon={Users}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
+          tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
         />
 
-        {/* ADR with progress ring vs breakeven */}
+        {/* ADR */}
         <MetricCard
           title="Average Room Rate"
           value={currency(averageRoomRateFinal)}
@@ -662,9 +651,10 @@ const Dashboard = ({ overview }) => {
           icon={Home}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
+          tooltip="ADR = Revenue MTD ÷ Room-nights sold MTD (from Daily sheet), cutoff: yesterday 23:59."
         />
 
-        {/* Target Variance with progress ring (same completion as Revenue tile) */}
+        {/* Target Variance */}
         <MetricCard
           title="Target Variance"
           value={currency(Math.abs(ov.targetVariance))}
@@ -672,6 +662,7 @@ const Dashboard = ({ overview }) => {
           icon={Target}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
+          tooltip="Variance uses the same to-date cutoff as Revenue."
         />
       </div>
 
@@ -706,6 +697,31 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
+  /* -------- Room Types & Historical (unchanged from your current build) -------- */
+
+  // Room types (keep your existing data/logic if provided in the API)
+  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
+    { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
+    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
+    { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
+    { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
+  ];
+  const roomTypeData = roomTypeRaw.map((rt) => {
+    const available = num(rt.available, null);
+    const sold      = num(rt.sold, null);
+    const revenue   = num(rt.revenue, 0);
+    const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
+    const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
+    const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
+    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
+  });
+
+  const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
+  const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
+  const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
+  const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
+  const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
+
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
@@ -719,10 +735,10 @@ const Dashboard = ({ overview }) => {
         sold: (r) => num(r.sold),
       };
       const keyFn = keyMap[sortBy] || keyMap.revenue;
-      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a)).slice(0, undefined).map(x=>x);
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
     }, [roomTypeData, sortBy]);
 
-    useEffect(()=>{ if (asc) sorted.reverse(); }, [asc]); // small toggle without re-sorting
+    useEffect(() => { if (asc) sorted.reverse(); }, [asc, sorted]);
 
     return (
       <div className="space-y-8">
@@ -927,14 +943,20 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------ debug / framing ------------------------------ */
+  /* ------------------------------ header & layout ------------------------------ */
+
+  const tabs = [
+    { id: 'overview', name: 'Overview', icon: Activity },
+    { id: 'rooms', name: 'Room Types', icon: Home },
+    { id: 'historical', name: 'Historical', icon: Calendar },
+  ];
 
   const Inspector = () => {
-    if (!inspectOn) return null;
+    if (!showInspector) return null;
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
-          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle)</div>
+          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle; hidden in production)</div>
           {rawSlice && (
             <>
               <div><b>Raw slice:</b></div>
@@ -944,12 +966,13 @@ const Dashboard = ({ overview }) => {
           <div><b>Derived:</b></div>
           <pre className="overflow-auto">{JSON.stringify({
             month,
-            elapsedDays,
+            arrearsDays: ARREARS_DAYS,
+            elapsedDays: mtdRows.length,
             totalDays,
             occToDatePct: Math.round(occToDatePct),
             revenueProgressPct,
             rateProgressPct,
-            adrFromDaily: averageRoomRateFinal
+            adrFromDaily
           }, null, 2)}</pre>
         </div>
       </div>
@@ -973,24 +996,15 @@ const Dashboard = ({ overview }) => {
               <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
-                <p className="text-sm font-medium text-gray-900">
-                  {lastUpdatedStr || '—'}
-                </p>
+                <p className="text-sm font-medium text-gray-900">{lastUpdatedStr || '—'}</p>
                 {sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Source: {sourceInfo.source} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
+                    Source: {sourceInfo.source || '—'} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
                   </p>
                 )}
               </div>
             </div>
           </div>
-
-          {loading && <div className="pb-3 text-sm text-gray-600">Loading data for {month}…</div>}
-          {!loading && !monthOverview && (
-            <div className="pb-3 text-sm text-red-600">
-              No data found for {month}. Check admin APIs or add <code>/public/data/{month}.json</code>.
-            </div>
-          )}
         </div>
       </div>
 
@@ -998,7 +1012,7 @@ const Dashboard = ({ overview }) => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex space-x-1">
-          {[{ id: 'overview', name: 'Overview', icon: Activity }, { id: 'rooms', name: 'Room Types', icon: Home }, { id: 'historical', name: 'Historical', icon: Calendar }].map((tab) => (
+          {tabs.map((tab) => (
             <button key={tab.id} onClick={() => setSelectedView(tab.id)}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'}`}
               type="button" aria-current={selectedView === tab.id ? 'page' : undefined}>
