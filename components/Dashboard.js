@@ -54,7 +54,6 @@ const parseLastUpdated = (v) => {
 };
 
 /* ------------------------------ arrears setting ------------------------------ */
-// Data arrives 1 day in arrears (set to 0 if your feed becomes same-day)
 const ARREARS_DAYS = 1;
 
 /* ------------------------------ month utils ------------------------------ */
@@ -273,7 +272,6 @@ function getTargetsForMonth(monthKey) {
 }
 
 /* ------------------------------ Occupancy to-date (weighted) ------------------------------ */
-// NOTE: now takes a "cutoff" date so we can honor arrears (e.g., yesterday 23:59:59)
 function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay = 60) {
   if (!Array.isArray(dailyRows) || dailyRows.length === 0) return 0;
 
@@ -282,7 +280,6 @@ function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay
       const d = new Date(r.date);
       return !Number.isNaN(d.valueOf()) && d <= cutoff;
     }
-    // if only numeric days exist we keep them (assumed ≤ cutoff)
     return Number.isFinite(r?.day);
   });
 
@@ -292,7 +289,7 @@ function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay
   for (const r of rowsToDate) {
     const rate = num(r.rate, 0);
     const rev  = num(r.revenue, 0);
-    const occP = num(r.occupancy, 0); // percent (0–100)
+    const occP = num(r.occupancy, 0);
 
     const sold = rate > 0 ? (rev / rate) : 0; // room nights sold
     let avail = 0;
@@ -517,21 +514,7 @@ const Dashboard = ({ overview }) => {
   const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
-  // ADR fallback from daily
-  const dailyRates = (ov.dailyData || [])
-    .map(d => num(d.rate, NaN))
-    .filter(n => Number.isFinite(n) && n > 0);
-  const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
-  const averageRoomRateFinal = (ov.averageRoomRate && ov.averageRoomRate > 0)
-    ? Math.round(ov.averageRoomRate)
-    : (rtWeightedADR || dailyRateAvg || 0);
-
-  // targets
-  const monthTargets = getTargetsForMonth(month);
-  const OCC_TARGET = num(monthTargets.occupancyPct, 62);
-  const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
-
-  // --- cutoff for to-date metrics (arrears-aware)
+  // ----- MTD cutoff (arrears-aware) -----
   const cutoffDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - ARREARS_DAYS);
@@ -539,30 +522,54 @@ const Dashboard = ({ overview }) => {
     return d;
   }, []);
 
-  // ✅ Occupancy to-date (weighted) using cutoff
-  const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
-
-  // ✅ MTD days chip using the same cutoff
-  const elapsedDays = useMemo(() => {
-    if (!Array.isArray(ov.dailyData) || ov.dailyData.length === 0) return 0;
+  const mtdRows = useMemo(() => {
+    if (!Array.isArray(ov.dailyData)) return [];
     return ov.dailyData.filter(r => {
       if (r?.date) {
         const d = new Date(r.date);
         return !Number.isNaN(d.valueOf()) && d <= cutoffDate;
       }
       return Number.isFinite(r?.day);
-    }).length;
+    });
   }, [ov.dailyData, cutoffDate]);
 
+  // ----- ADR from Daily tab: revenue-to-date ÷ room nights sold-to-date -----
+  const revSumMTD   = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
+  const nightsSumMTD = mtdRows.reduce((a, d) => {
+    const rate = num(d.rate, 0);
+    const rev  = num(d.revenue, 0);
+    return a + (rate > 0 ? (rev / rate) : 0);
+  }, 0);
+  const arrFromDaily = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
+
+  // ADR fallback chain (room types -> daily avg -> provided)
+  const dailyRates = (ov.dailyData || [])
+    .map(d => num(d.rate, NaN))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
+
+  // Final ADR prioritizes Daily-sheet computation
+  const averageRoomRateFinal = arrFromDaily || (rtWeightedADR || dailyRateAvg || Math.round(ov.averageRoomRate) || 0);
+
+  // targets
+  const monthTargets = getTargetsForMonth(month);
+  const OCC_TARGET = num(monthTargets.occupancyPct, 62);
+  const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
+
+  // Occupancy to-date (weighted) using cutoff
+  const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
+
+  // MTD days chip
+  const elapsedDays = useMemo(() => mtdRows.length, [mtdRows]);
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
-  // Revenue progress vs target (100% = target met)
+  // Progress percentages for rings
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
+  const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
   /* ------------------------------ UI bits ------------------------------ */
 
-  // allow a custom right-side slot (e.g., progress ring)
   const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot }) => (
     <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
       <div className="flex items-start justify-between p-6">
@@ -647,17 +654,24 @@ const Dashboard = ({ overview }) => {
           rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
         />
 
+        {/* ADR with progress ring vs breakeven */}
         <MetricCard
           title="Average Room Rate"
           value={currency(averageRoomRateFinal)}
           subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`}
           icon={Home}
+          chip={mtdChip}
+          rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
         />
+
+        {/* Target Variance with progress ring (same completion as Revenue tile) */}
         <MetricCard
           title="Target Variance"
           value={currency(Math.abs(ov.targetVariance))}
           subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
           icon={Target}
+          chip={mtdChip}
+          rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
         />
       </div>
 
@@ -933,7 +947,9 @@ const Dashboard = ({ overview }) => {
             elapsedDays,
             totalDays,
             occToDatePct: Math.round(occToDatePct),
-            revenueProgressPct
+            revenueProgressPct,
+            rateProgressPct,
+            adrFromDaily: averageRoomRateFinal
           }, null, 2)}</pre>
         </div>
       </div>
