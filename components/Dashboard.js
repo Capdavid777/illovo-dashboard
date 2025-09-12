@@ -133,7 +133,7 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   );
 }
 
-/* ------------------------------ detect & map Daily rows ------------------------------ */
+/* ------------------------------ deep helpers for normalization ------------------------------ */
 
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
@@ -177,25 +177,13 @@ function mapDailyRow(d, i) {
     return undefined;
   };
 
-  const day = num(lookup(['day','d','dateDay']), NaN);
-  const date = lookup(['date','dt','dayDate']);
-
-  // revenue: prefer accommodation revenue if present
-  const revenue = num(lookup([
-    'accommodationRevenue','accommRevenue','accomRevenue','accRevenue',
-    'roomRevenue','roomsRevenue','revenue','totalRevenue','rev','income'
-  ]), NaN);
-
+  const day = num(lookup(['day', 'd', 'dateDay']), NaN);
+  const date = lookup(['date', 'dt', 'dayDate']);
+  const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
-
-  // NEW: explicit rooms sold / room nights (from the sheet’s Daily tab)
-  const soldRaw = lookup(['roomsSold','roomSold','roomNights','roomnights','nights','sold','rn']);
-  const sold = Number.isFinite(num(soldRaw, NaN)) ? num(soldRaw) : NaN;
-
   const occVal  = lookup(['occupancy','occ','occupancyRate','occRate','occ%']);
   const occupancy = asPercent(occVal ?? NaN, NaN);
-
   const metFlag = lookup(['met','hitTarget','metTarget']);
 
   return {
@@ -204,7 +192,6 @@ function mapDailyRow(d, i) {
     revenue: Number.isFinite(revenue) ? revenue : 0,
     target: Number.isFinite(target) ? target : 0,
     rate: Number.isFinite(rate) ? rate : 0,
-    sold: Number.isFinite(sold) ? sold : null,
     occupancy: Number.isFinite(occupancy) ? occupancy : 0,
     met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
   };
@@ -308,12 +295,9 @@ function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay
     const rev  = num(r.revenue, 0);
     const occP = num(r.occupancy, 0);
 
-    const sold = Number.isFinite(num(r.sold, NaN))
-      ? num(r.sold)
-      : (rate > 0 ? (rev / rate) : 0);
-
-    // If we don’t have explicit available rooms, estimate from occupancy when possible
+    const sold = rate > 0 ? (rev / rate) : 0; // room nights sold
     let avail = 0;
+
     if (occP > 0 && sold > 0) {
       avail = sold / (occP / 100);
     } else if (occP > 0 || sold > 0) {
@@ -368,7 +352,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
   );
 }
 
-/* ------------------------------ Info tip & card ------------------------------ */
+/* ------------------------------ Metric card ------------------------------ */
 
 const InfoTip = ({ children }) => (
   <span className="inline-flex items-center gap-1 text-gray-500" title={children}>
@@ -558,18 +542,16 @@ const Dashboard = ({ overview }) => {
     });
   }, [ov.dailyData, cutoffDate]);
 
-  // ----- ADR from Daily tab: Revenue MTD ÷ Rooms-Sold MTD (preferred) -----
-  const revSumMTD = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
+  // ----- ADR from Daily tab: revenue-to-date ÷ room nights sold-to-date -----
+  const revSumMTD   = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
   const nightsSumMTD = mtdRows.reduce((a, d) => {
-    // prefer explicit rooms-sold, else fallback to revenue ÷ rate
-    if (Number.isFinite(num(d.sold, NaN)) && num(d.sold) > 0) return a + num(d.sold);
     const rate = num(d.rate, 0);
     const rev  = num(d.revenue, 0);
     return a + (rate > 0 ? (rev / rate) : 0);
   }, 0);
   const adrFromDaily = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
 
-  // Fallbacks if Daily is missing
+  // Fallback chain (if Daily is missing)
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
@@ -639,6 +621,7 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Revenue */}
         <MetricCard
           title="Revenue to Date"
           value={currency(ov.revenueToDate)}
@@ -649,6 +632,7 @@ const Dashboard = ({ overview }) => {
           tooltip="Completion vs daily target (to date)."
         />
 
+        {/* Occupancy */}
         <MetricCard
           title="Occupancy Rate"
           value={pct(occToDatePct)}
@@ -659,6 +643,7 @@ const Dashboard = ({ overview }) => {
           tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
         />
 
+        {/* ADR */}
         <MetricCard
           title="Average Room Rate"
           value={currency(averageRoomRateFinal)}
@@ -666,9 +651,10 @@ const Dashboard = ({ overview }) => {
           icon={Home}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
-          tooltip="ADR = Revenue MTD ÷ Rooms-Sold MTD (from Daily), cutoff: yesterday 23:59."
+          tooltip="ADR = Revenue MTD ÷ Room-nights sold MTD (from Daily sheet), cutoff: yesterday 23:59."
         />
 
+        {/* Target Variance */}
         <MetricCard
           title="Target Variance"
           value={currency(Math.abs(ov.targetVariance))}
@@ -711,15 +697,258 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* -------- Room Types & Historical (same as before) -------- */
+  /* -------- Room Types & Historical (unchanged from your current build) -------- */
 
-  // You can keep (or remove) the Room Types / Historical sections you had previously.
-  // For brevity of this drop-in, those sections are omitted; paste them back if you use them elsewhere.
+  // Room types (keep your existing data/logic if provided in the API)
+  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
+    { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
+    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
+    { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
+    { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
+  ];
+  const roomTypeData = roomTypeRaw.map((rt) => {
+    const available = num(rt.available, null);
+    const sold      = num(rt.sold, null);
+    const revenue   = num(rt.revenue, 0);
+    const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
+    const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
+    const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
+    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
+  });
+
+  const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
+  const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
+  const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
+  const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
+  const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
+
+  const RoomTypesView = () => {
+    const [sortBy, setSortBy] = useState('revenue');
+    const [asc, setAsc] = useState(false);
+    const [compact, setCompact] = useState(true);
+
+    const sorted = useMemo(() => {
+      const keyMap = {
+        revenue: (r) => num(r.revenue),
+        occupancy: (r) => num(r.occupancy),
+        rate: (r) => num(r.rate),
+        sold: (r) => num(r.sold),
+      };
+      const keyFn = keyMap[sortBy] || keyMap.revenue;
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
+    }, [roomTypeData, sortBy]);
+
+    useEffect(() => { if (asc) sorted.reverse(); }, [asc, sorted]);
+
+    return (
+      <div className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
+          <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
+          <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
+          <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
+        </div>
+
+        <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-600">Sort by</label>
+            <select className="border rounded-md px-2 py-1 text-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="revenue">Revenue</option>
+              <option value="occupancy">Occupancy</option>
+              <option value="rate">ADR</option>
+              <option value="sold">Sold</option>
+            </select>
+            <button className="ml-2 inline-flex items-center border px-2 py-1 rounded-md text-sm" onClick={() => setAsc(v => !v)} type="button" title="Toggle ascending/descending">
+              <ArrowUpDown className="w-4 h-4 mr-1" />
+              {asc ? 'Asc' : 'Desc'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="density" className="text-sm text-gray-600">Density</label>
+            <select id="density" className="border rounded-md px-2 py-1 text-sm" value={compact ? 'compact' : 'comfort'} onChange={(e) => setCompact(e.target.value === 'compact')}>
+              <option value="comfort">Comfort</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+        </div>
+
+        <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
+          {sorted.map((room, i) => {
+            const pal = getPalette(room.type);
+            return (
+              <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-lg font-semibold">{room.type}</h4>
+                    <p className="text-xs text-gray-500">
+                      <span>{num(room.sold)}</span>
+                      <span className="mx-0.5 font-bold text-black">/</span>
+                      <span>{num(room.available)}</span>
+                      <span> sold</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div title="Month-to-date revenue">
+                    <p className="text-gray-500">Revenue</p>
+                    <p className="font-semibold">{currency(room.revenue)}</p>
+                  </div>
+                  <div title="Average daily rate (ADR)">
+                    <p className="text-gray-500">ADR</p>
+                    <p className="font-semibold">{currency(room.rate)}</p>
+                  </div>
+                  <div className="col-span-2" title="Occupancy (sold ÷ available)">
+                    <p className="text-gray-500 mb-1">Occupancy</p>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div className="h-2 rounded-full"
+                        style={{ width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
+                                 background: `linear-gradient(90deg, ${pal.start}, ${pal.end})` }} />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600">{pct(room.occupancy)}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="bg-white p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-semibold mb-2">Revenue by Room Type</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <defs>
+                    {roomTypeData.map((r) => {
+                      const pal = getPalette(r.type);
+                      const id = gradIdFor(r.type);
+                      return (
+                        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1" key={id}>
+                          <stop offset="0%" stopColor={pal.start} />
+                          <stop offset="100%" stopColor={pal.end} />
+                        </linearGradient>
+                      );
+                    })}
+                  </defs>
+                  <Pie data={roomTypeData} cx="50%" cy="50%" labelLine={false}
+                       label={({ payload, percent, x, y, textAnchor }) => {
+                         const pal = getPalette(payload.type);
+                         return <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
+                           {payload.type} {(percent * 100).toFixed(0)}%
+                         </text>;
+                       }} outerRadius={80} dataKey="revenue">
+                    {roomTypeData.map((r, idx) => (<Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />))}
+                  </Pie>
+                  <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={roomTypeData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="type" />
+                  <YAxis tick={Y_TICK_SMALL} />
+                  <RechartsTooltip formatter={(value, name) => {
+                    if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
+                    if (name === 'rate') return [currency(value), 'ADR'];
+                    return [value, name];
+                  }} />
+                  <Legend />
+                  <Bar dataKey="occupancy" fill="#10B981" name="Occupancy (%)" />
+                  <Bar dataKey="rate" fill="#3B82F6" name="ADR (R)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
+    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
+    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
+    { year: '2024', roomsSold: 759,  occupancy: 45, revenue: 701738,  rate: 925  },
+    { year: '2025', roomsSold: 569,  occupancy: 46, revenue: 593854,  rate: 1042 }
+  ];
+
+  const HistoricalView = () => (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h3 className="text-lg font-semibold mb-4">Annual Revenue Trend</h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="year" />
+                <YAxis tick={Y_TICK_SMALL} />
+                <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
+                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h3 className="text-lg font-semibold mb-4">Occupancy Trend</h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="year" />
+                <YAxis tick={Y_TICK_SMALL} />
+                <RechartsTooltip formatter={(value) => [`${Math.round(num(value))}%`, 'Occupancy']} />
+                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow-lg">
+        <h3 className="text-lg font-semibold mb-4">Year-over-Year Comparison</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Year</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rooms Sold</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Occupancy</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Rate</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {yearlyData.map((y, i) => (
+                <tr key={y.year || i}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{y.year}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{num(y.roomsSold)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pct(asPercent(y.occupancy))}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.revenue)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ------------------------------ header & layout ------------------------------ */
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: Activity },
-    // { id: 'rooms', name: 'Room Types', icon: Home },
-    // { id: 'historical', name: 'Historical', icon: Calendar },
+    { id: 'rooms', name: 'Room Types', icon: Home },
+    { id: 'historical', name: 'Historical', icon: Calendar },
   ];
 
   const Inspector = () => {
@@ -743,8 +972,6 @@ const Dashboard = ({ overview }) => {
             occToDatePct: Math.round(occToDatePct),
             revenueProgressPct,
             rateProgressPct,
-            revSumMTD,
-            nightsSumMTD,
             adrFromDaily
           }, null, 2)}</pre>
         </div>
@@ -797,6 +1024,8 @@ const Dashboard = ({ overview }) => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         {selectedView === 'overview' && <OverviewView />}
+        {selectedView === 'rooms' && <RoomTypesView />}
+        {selectedView === 'historical' && <HistoricalView />}
       </div>
     </div>
   );
