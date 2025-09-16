@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  the const date = lookup(['date', 'dt', 'dayDate']);
+  const date = lookup(['date', 'dt', 'dayDate']); // <-- fixed (no stray "the")
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -752,7 +752,7 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* ✅ Title inside */}
+                  {/* Title inside */}
                   <text
                     x="50%" y={18}
                     textAnchor="middle" dominantBaseline="middle"
@@ -799,7 +799,7 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* ✅ Title inside */}
+                  {/* Title inside */}
                   <text
                     x="50%" y={18}
                     textAnchor="middle" dominantBaseline="middle"
@@ -845,7 +845,7 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* ✅ Title inside */}
+                {/* Title inside */}
                 <text
                   x="50%" y={18}
                   textAnchor="middle" dominantBaseline="middle"
@@ -869,7 +869,7 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* ✅ Title inside */}
+                {/* Title inside */}
                 <text
                   x="50%" y={18}
                   textAnchor="middle" dominantBaseline="middle"
