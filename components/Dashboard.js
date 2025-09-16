@@ -383,6 +383,20 @@ const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, toolt
   </div>
 );
 
+/* ------------------------------ shared chart-title helper ------------------------------ */
+
+const SvgChartTitle = ({ children, y = 18 }) => (
+  <text
+    x="50%"
+    y={y}
+    textAnchor="middle"
+    dominantBaseline="middle"
+    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+  >
+    {children}
+  </text>
+);
+
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
@@ -677,11 +691,14 @@ const Dashboard = ({ overview }) => {
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
-        <h3 className="text-lg font-semibold mb-4">Daily Revenue vs Target</h3>
+        <h3 className="sr-only">Daily Revenue vs Target</h3>
         <div className="h-80">
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ov.dailyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+              <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                {/* Title inside chart */}
+                <SvgChartTitle>Daily Revenue vs Target</SvgChartTitle>
+
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
                 <YAxis tick={Y_TICK_SMALL} />
@@ -707,9 +724,8 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* -------- Room Types & Historical (unchanged from your current build) -------- */
+  /* -------- Room Types & Historical (unchanged data; added titles in charts) -------- */
 
-  // Room types (keep your existing data/logic if provided in the API)
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
     { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
@@ -759,77 +775,13 @@ const Dashboard = ({ overview }) => {
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
         </div>
 
-        <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-600">Sort by</label>
-            <select className="border rounded-md px-2 py-1 text-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="revenue">Revenue</option>
-              <option value="occupancy">Occupancy</option>
-              <option value="rate">ADR</option>
-              <option value="sold">Sold</option>
-            </select>
-            <button className="ml-2 inline-flex items-center border px-2 py-1 rounded-md text-sm" onClick={() => setAsc(v => !v)} type="button" title="Toggle ascending/descending">
-              <ArrowUpDown className="w-4 h-4 mr-1" />
-              {asc ? 'Asc' : 'Desc'}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label htmlFor="density" className="text-sm text-gray-600">Density</label>
-            <select id="density" className="border rounded-md px-2 py-1 text-sm" value={compact ? 'compact' : 'comfort'} onChange={(e) => setCompact(e.target.value === 'compact')}>
-              <option value="comfort">Comfort</option>
-              <option value="compact">Compact</option>
-            </select>
-          </div>
-        </div>
-
-        <div className={`grid gap-6 ${compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
-          {sorted.map((room, i) => {
-            const pal = getPalette(room.type);
-            return (
-              <div key={room.type + i} className="bg-white rounded-lg shadow p-5 border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-lg font-semibold">{room.type}</h4>
-                    <p className="text-xs text-gray-500">
-                      <span>{num(room.sold)}</span>
-                      <span className="mx-0.5 font-bold text-black">/</span>
-                      <span>{num(room.available)}</span>
-                      <span> sold</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div title="Month-to-date revenue">
-                    <p className="text-gray-500">Revenue</p>
-                    <p className="font-semibold">{currency(room.revenue)}</p>
-                  </div>
-                  <div title="Average daily rate (ADR)">
-                    <p className="text-gray-500">ADR</p>
-                    <p className="font-semibold">{currency(room.rate)}</p>
-                  </div>
-                  <div className="col-span-2" title="Occupancy (sold ÷ available)">
-                    <p className="text-gray-500 mb-1">Occupancy</p>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="h-2 rounded-full"
-                        style={{ width: `${Math.max(0, Math.min(100, num(room.occupancy)))}%`,
-                                 background: `linear-gradient(90deg, ${pal.start}, ${pal.end})` }} />
-                    </div>
-                    <p className="mt-1 text-xs text-gray-600">{pct(room.occupancy)}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold mb-2">Revenue by Room Type</h3>
+            <h3 className="sr-only">Revenue by Room Type</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  <SvgChartTitle>Revenue by Room Type</SvgChartTitle>
                   <defs>
                     {roomTypeData.map((r) => {
                       const pal = getPalette(r.type);
@@ -858,10 +810,11 @@ const Dashboard = ({ overview }) => {
           </div>
 
           <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="text-lg font-semibold">Occupancy vs ADR</h3>
+            <h3 className="sr-only">Occupancy vs ADR</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={roomTypeData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+                <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  <SvgChartTitle>Occupancy vs ADR</SvgChartTitle>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
                   <YAxis tick={Y_TICK_SMALL} />
@@ -893,10 +846,11 @@ const Dashboard = ({ overview }) => {
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-semibold mb-4">Annual Revenue Trend</h3>
+          <h3 className="sr-only">Annual Revenue Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+              <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                <SvgChartTitle>Annual Revenue Trend</SvgChartTitle>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
@@ -908,10 +862,11 @@ const Dashboard = ({ overview }) => {
         </div>
 
         <div className="bg-white p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-semibold mb-4">Occupancy Trend</h3>
+          <h3 className="sr-only">Occupancy Trend</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={yearlyData} margin={{ top: 16, right: 16, bottom: 8, left: 8 }}>
+              <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                <SvgChartTitle>Occupancy Trend</SvgChartTitle>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
