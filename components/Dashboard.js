@@ -557,7 +557,6 @@ const Dashboard = ({ overview }) => {
   }, [ov.dailyData, cutoffDate]);
 
   // ----- ARR (Average Room Rate) from Daily tab -----
-  // We follow the spreadsheet logic: **simple mean of the daily ARR values to date**.
   const arrRatesMTD = mtdRows
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
@@ -565,7 +564,7 @@ const Dashboard = ({ overview }) => {
     ? Math.round(arrRatesMTD.reduce((a,b)=>a+b,0) / arrRatesMTD.length)
     : 0;
 
-  // (kept as a fallback / sanity check) Weighted ADR = Revenue ÷ Room-nights sold
+  // Weighted ADR (sanity check)
   const revSumMTD   = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
   const nightsSumMTD = mtdRows.reduce((a, d) => {
     const rate = num(d.rate, 0);
@@ -580,7 +579,7 @@ const Dashboard = ({ overview }) => {
     .filter(n => Number.isFinite(n) && n > 0);
   const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
 
-  // Final ADR prioritizes the Daily sheet's mean-of-ARR (matches your spreadsheet total)
+  // Final ADR prioritizes the Daily sheet's mean-of-ARR
   const averageRoomRateFinal =
     arrMeanMTD || arrWeightedMTD || Math.round(num(ov.averageRoomRate)) || dailyRateAvg || 0;
 
@@ -691,12 +690,13 @@ const Dashboard = ({ overview }) => {
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
+        {/* External heading for a11y/print if you keep it; it's okay to remove */}
         <h3 className="sr-only">Daily Revenue vs Target</h3>
         <div className="h-80">
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside chart */}
+                {/* Title INSIDE the SVG */}
                 <SvgChartTitle>Daily Revenue vs Target</SvgChartTitle>
 
                 <CartesianGrid strokeDasharray="3 3" />
@@ -724,7 +724,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* -------- Room Types & Historical (unchanged data; added titles in charts) -------- */
+  /* -------- Room Types & Historical -------- */
 
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
@@ -781,7 +781,9 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  {/* Title inside */}
                   <SvgChartTitle>Revenue by Room Type</SvgChartTitle>
+
                   <defs>
                     {roomTypeData.map((r) => {
                       const pal = getPalette(r.type);
@@ -814,7 +816,9 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  {/* Title inside */}
                   <SvgChartTitle>Occupancy vs ADR</SvgChartTitle>
+
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
                   <YAxis tick={Y_TICK_SMALL} />
@@ -850,7 +854,9 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                {/* Title inside */}
                 <SvgChartTitle>Annual Revenue Trend</SvgChartTitle>
+
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
@@ -866,7 +872,9 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                {/* Title inside */}
                 <SvgChartTitle>Occupancy Trend</SvgChartTitle>
+
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis tick={Y_TICK_SMALL} />
