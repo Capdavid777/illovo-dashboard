@@ -54,7 +54,6 @@ const parseLastUpdated = (v) => {
 };
 
 /* ------------------------------ arrears setting ------------------------------ */
-// You can override in .env.local: NEXT_PUBLIC_ARREARS_DAYS=1
 const ARREARS_DAYS = (() => {
   const v = typeof process !== 'undefined' ? Number(process.env.NEXT_PUBLIC_ARREARS_DAYS) : NaN;
   return Number.isFinite(v) ? v : 1;
@@ -178,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']);
+  the const date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -324,8 +323,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
   const c = 2 * Math.PI * radius;
   const dash = (p / 100) * c;
 
-  // position target marker on circumference
-  const angle = (t / 100) * 2 * Math.PI - Math.PI / 2; // start at top
+  const angle = (t / 100) * 2 * Math.PI - Math.PI / 2;
   const cx = size / 2 + radius * Math.cos(angle);
   const cy = size / 2 + radius * Math.sin(angle);
 
@@ -334,17 +332,13 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
 
   return (
     <svg width={size} height={size} aria-label={label || 'progress'}>
-      {/* track */}
       <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={stroke} />
-      {/* progress */}
       <circle
         cx={size/2} cy={size/2} r={radius} fill="none"
         stroke={progColor} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={`${dash} ${c - dash}`} transform={`rotate(-90 ${size/2} ${size/2})`}
       />
-      {/* target marker */}
       <circle cx={cx} cy={cy} r={3.2} fill="#000" />
-      {/* center text */}
       <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="12" fontWeight="600" fill="#111">
         {Math.round(p)}%
       </text>
@@ -381,20 +375,6 @@ const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, toolt
       </div>
     </div>
   </div>
-);
-
-/* ------------------------------ shared chart-title helper ------------------------------ */
-
-const SvgChartTitle = ({ children, y = 18 }) => (
-  <text
-    x="50%"
-    y={y}
-    textAnchor="middle"
-    dominantBaseline="middle"
-    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
-  >
-    {children}
-  </text>
 );
 
 /* ------------------------------ component ------------------------------ */
@@ -537,7 +517,6 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ derived aggregates ------------------------------ */
 
-  // ----- MTD cutoff (arrears-aware) -----
   const cutoffDate = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - ARREARS_DAYS);
@@ -556,7 +535,6 @@ const Dashboard = ({ overview }) => {
     });
   }, [ov.dailyData, cutoffDate]);
 
-  // ----- ARR (Average Room Rate) from Daily tab -----
   const arrRatesMTD = mtdRows
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
@@ -564,7 +542,6 @@ const Dashboard = ({ overview }) => {
     ? Math.round(arrRatesMTD.reduce((a,b)=>a+b,0) / arrRatesMTD.length)
     : 0;
 
-  // Weighted ADR (sanity check)
   const revSumMTD   = mtdRows.reduce((a, d) => a + num(d.revenue, 0), 0);
   const nightsSumMTD = mtdRows.reduce((a, d) => {
     const rate = num(d.rate, 0);
@@ -573,34 +550,28 @@ const Dashboard = ({ overview }) => {
   }, 0);
   const arrWeightedMTD = nightsSumMTD > 0 ? Math.round(revSumMTD / nightsSumMTD) : 0;
 
-  // Fallback if Daily is missing
   const dailyRates = (ov.dailyData || [])
     .map(d => num(d.rate, NaN))
     .filter(n => Number.isFinite(n) && n > 0);
   const dailyRateAvg = dailyRates.length ? Math.round(dailyRates.reduce((a,b)=>a+b,0) / dailyRates.length) : 0;
 
-  // Final ADR prioritizes the Daily sheet's mean-of-ARR
   const averageRoomRateFinal =
     arrMeanMTD || arrWeightedMTD || Math.round(num(ov.averageRoomRate)) || dailyRateAvg || 0;
 
-  // targets
   const monthTargets = getTargetsForMonth(month);
   const OCC_TARGET = num(monthTargets.occupancyPct, 62);
   const ARR_BREAKEVEN = num(monthTargets.arrBreakeven, 1237);
 
-  // Occupancy to-date (weighted) using cutoff
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
-  // MTD days chip
   const elapsedDays = mtdRows.length;
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
-  // Progress percentages for rings
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ------------------------------ charts helpers ------------------------------ */
+  /* ------------------------------ legends & tooltips ------------------------------ */
 
   const LegendSwatch = ({ type }) => (
     <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2,
@@ -644,7 +615,6 @@ const Dashboard = ({ overview }) => {
   const OverviewView = () => (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Revenue */}
         <MetricCard
           title="Revenue to Date"
           value={currency(ov.revenueToDate)}
@@ -654,8 +624,6 @@ const Dashboard = ({ overview }) => {
           rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
           tooltip="Completion vs daily target (to date)."
         />
-
-        {/* Occupancy */}
         <MetricCard
           title="Occupancy Rate"
           value={pct(occToDatePct)}
@@ -665,8 +633,6 @@ const Dashboard = ({ overview }) => {
           rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
           tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
         />
-
-        {/* ARR (mean of daily ARR values) */}
         <MetricCard
           title="Average Room Rate"
           value={currency(averageRoomRateFinal)}
@@ -676,8 +642,6 @@ const Dashboard = ({ overview }) => {
           rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
           tooltip="ARR = simple average of Daily tab's ARR values to date (matches spreadsheet)."
         />
-
-        {/* Target Variance */}
         <MetricCard
           title="Target Variance"
           value={currency(Math.abs(ov.targetVariance))}
@@ -690,14 +654,21 @@ const Dashboard = ({ overview }) => {
       </div>
 
       <div className="bg-white p-6 rounded-lg shadow-lg">
-        {/* External heading for a11y/print if you keep it; it's okay to remove */}
         <h3 className="sr-only">Daily Revenue vs Target</h3>
         <div className="h-80">
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title INSIDE the SVG */}
-                <SvgChartTitle>Daily Revenue vs Target</SvgChartTitle>
+                {/* ✅ Title inside the SVG */}
+                <text
+                  x="50%"
+                  y={18}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                >
+                  Daily Revenue vs Target
+                </text>
 
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
@@ -724,7 +695,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* -------- Room Types & Historical -------- */
+  /* -------- Room Types -------- */
 
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
@@ -781,8 +752,14 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* Title inside */}
-                  <SvgChartTitle>Revenue by Room Type</SvgChartTitle>
+                  {/* ✅ Title inside */}
+                  <text
+                    x="50%" y={18}
+                    textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                  >
+                    Revenue by Room Type
+                  </text>
 
                   <defs>
                     {roomTypeData.map((r) => {
@@ -796,13 +773,19 @@ const Dashboard = ({ overview }) => {
                       );
                     })}
                   </defs>
-                  <Pie data={roomTypeData} cx="50%" cy="50%" labelLine={false}
-                       label={({ payload, percent, x, y, textAnchor }) => {
-                         const pal = getPalette(payload.type);
-                         return <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
-                           {payload.type} {(percent * 100).toFixed(0)}%
-                         </text>;
-                       }} outerRadius={80} dataKey="revenue">
+                  <Pie
+                    data={roomTypeData}
+                    cx="50%" cy="50%"
+                    labelLine={false}
+                    label={({ payload, percent, x, y, textAnchor }) => {
+                      const pal = getPalette(payload.type);
+                      return <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
+                        {payload.type} {(percent * 100).toFixed(0)}%
+                      </text>;
+                    }}
+                    outerRadius={80}
+                    dataKey="revenue"
+                  >
                     {roomTypeData.map((r, idx) => (<Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />))}
                   </Pie>
                   <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
@@ -816,8 +799,14 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* Title inside */}
-                  <SvgChartTitle>Occupancy vs ADR</SvgChartTitle>
+                  {/* ✅ Title inside */}
+                  <text
+                    x="50%" y={18}
+                    textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                  >
+                    Occupancy vs ADR
+                  </text>
 
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
@@ -839,6 +828,8 @@ const Dashboard = ({ overview }) => {
     );
   };
 
+  /* -------- Historical -------- */
+
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
     { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
@@ -854,8 +845,14 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside */}
-                <SvgChartTitle>Annual Revenue Trend</SvgChartTitle>
+                {/* ✅ Title inside */}
+                <text
+                  x="50%" y={18}
+                  textAnchor="middle" dominantBaseline="middle"
+                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                >
+                  Annual Revenue Trend
+                </text>
 
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
@@ -872,8 +869,14 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside */}
-                <SvgChartTitle>Occupancy Trend</SvgChartTitle>
+                {/* ✅ Title inside */}
+                <text
+                  x="50%" y={18}
+                  textAnchor="middle" dominantBaseline="middle"
+                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                >
+                  Occupancy Trend
+                </text>
 
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
