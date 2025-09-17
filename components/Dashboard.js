@@ -177,7 +177,8 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']); // <-- fixed (no stray "the")
+  the // (no stray token)
+  const date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -571,35 +572,32 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- NEW: derive a single daily target level for the line ---------- */
+  /* ---------- Target line value (no legend item) ---------- */
   const dailyTargetLevel = useMemo(() => {
-    // Prefer the first explicit per-day target if present
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
-    // Otherwise estimate from target-to-date / total days
     if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays]);
 
   /* ------------------------------ legends & tooltips ------------------------------ */
 
-  const LegendSwatch = ({ type }) => (
-    <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2,
-      background: type === 'revenue' ? 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)' : '#000000',
-      border: '1px solid rgba(0,0,0,0.25)' }} />
-  );
-
+  // Legend now ONLY shows revenue, so that black target square is gone
   const renderLegend = () => (
     <div className="flex items-center justify-center gap-6 mt-2 text-sm">
-      <div className="flex items-center gap-2"><LegendSwatch type="target" /><span>Daily Target</span></div>
-      <div className="flex items-center gap-2"><LegendSwatch type="revenue" /><span>Actual Revenue</span></div>
+      <div className="flex items-center gap-2">
+        <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2, background: 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)', border: '1px solid rgba(0,0,0,0.25)' }} />
+        <span>Actual Revenue</span>
+      </div>
     </div>
   );
 
+  // Tooltip shows ONLY actual revenue amount
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
     const rev = num(pData.revenue);
+    // Color per hit/miss vs target for visual context
     const tgt = num(dailyTargetLevel);
     const epsilon = Math.max(100, tgt * 0.01);
     const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
@@ -609,11 +607,10 @@ const Dashboard = ({ overview }) => {
       <div className="rounded-md bg-white shadow border p-3 text-sm">
         <div className="font-medium mb-1">Day {label}</div>
         <div className="flex items-center justify-between gap-6">
-          <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" /><span>Daily Target</span></div>
-          <span className="font-medium">{currency(tgt)}</span>
-        </div>
-        <div className="flex items-center justify-between gap-6 mt-1">
-          <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} /><span>Actual Revenue</span></div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} />
+            <span>Actual Revenue</span>
+          </div>
           <span className="font-medium" style={{ color: revColor }}>{currency(rev)}</span>
         </div>
       </div>
@@ -669,7 +666,7 @@ const Dashboard = ({ overview }) => {
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* ✅ Title inside the SVG */}
+                {/* Title */}
                 <text
                   x="50%"
                   y={18}
@@ -686,7 +683,7 @@ const Dashboard = ({ overview }) => {
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
 
-                {/* ✅ Single horizontal target line instead of black bars */}
+                {/* Single horizontal target line */}
                 {dailyTargetLevel > 0 && (
                   <ReferenceLine
                     y={dailyTargetLevel}
