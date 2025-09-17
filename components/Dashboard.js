@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import {
   Activity, Calendar, DollarSign, Home, Target, Users,
-  ArrowUpDown, SlidersHorizontal, Info
+  SlidersHorizontal, Info
 } from 'lucide-react';
 
 /* ------------------------------ helpers ------------------------------ */
@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']); // fixed
+  const date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -294,16 +294,10 @@ function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay
     const rev  = num(r.revenue, 0);
     const occP = num(r.occupancy, 0);
 
-    const sold = rate > 0 ? (rev / rate) : 0; // room nights sold
-    let avail = 0;
-
-    if (occP > 0 && sold > 0) {
-      avail = sold / (occP / 100);
-    } else if (occP > 0 || sold > 0) {
-      avail = fallbackRoomsPerDay;
-    } else {
-      avail = fallbackRoomsPerDay;
-    }
+    const sold = rate > 0 ? (rev / rate) : 0;
+    const avail =
+      (occP > 0 && sold > 0) ? (sold / (occP / 100)) :
+      (occP > 0 || sold > 0) ? fallbackRoomsPerDay : fallbackRoomsPerDay;
 
     soldSum += sold;
     availSum += avail;
@@ -386,7 +380,6 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
-  the
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
   const [lastUpdatedStr, setLastUpdatedStr] = useState('');
@@ -572,7 +565,7 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- Target line value ---------- */
+  /* ---------- Target line value (single line, no legend entry) ---------- */
   const dailyTargetLevel = useMemo(() => {
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
@@ -582,7 +575,7 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ legends & tooltips ------------------------------ */
 
-  // Legend now ONLY shows revenue
+  // Legend now ONLY shows revenue (so the black square is gone)
   const renderLegend = () => (
     <div className="flex items-center justify-center gap-6 mt-2 text-sm">
       <div className="flex items-center gap-2">
@@ -592,7 +585,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  // Tooltip shows ONLY actual revenue amount
+  // Tooltip shows ONLY the actual revenue value
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
@@ -665,6 +658,7 @@ const Dashboard = ({ overview }) => {
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                {/* Title inside */}
                 <text
                   x="50%"
                   y={18}
@@ -681,7 +675,7 @@ const Dashboard = ({ overview }) => {
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
 
-                {/* single horizontal target line */}
+                {/* Single horizontal target line */}
                 {dailyTargetLevel > 0 && (
                   <ReferenceLine
                     y={dailyTargetLevel}
@@ -739,7 +733,6 @@ const Dashboard = ({ overview }) => {
   const RoomTypesView = () => {
     const [sortBy, setSortBy] = useState('revenue');
     const [asc, setAsc] = useState(false);
-    const [compact, setCompact] = useState(true);
 
     const sorted = useMemo(() => {
       const keyMap = {
@@ -817,7 +810,8 @@ const Dashboard = ({ overview }) => {
                 <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
                   <text
                     x="50%" y={18}
-                    textAnchor="middle" dominantBaseline="middle"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
                     style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
                   >
                     Occupancy vs ADR
