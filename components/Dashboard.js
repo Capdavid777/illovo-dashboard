@@ -5,7 +5,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
+  Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine
 } from 'recharts';
 import {
   Activity, Calendar, DollarSign, Home, Target, Users,
@@ -571,6 +571,16 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
+  /* ---------- NEW: derive a single daily target level for the line ---------- */
+  const dailyTargetLevel = useMemo(() => {
+    // Prefer the first explicit per-day target if present
+    const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
+    if (Number.isFinite(first)) return first;
+    // Otherwise estimate from target-to-date / total days
+    if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
+    return 0;
+  }, [ov.dailyData, ov.targetToDate, totalDays]);
+
   /* ------------------------------ legends & tooltips ------------------------------ */
 
   const LegendSwatch = ({ type }) => (
@@ -590,7 +600,7 @@ const Dashboard = ({ overview }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
     const rev = num(pData.revenue);
-    const tgt = num(pData.target);
+    const tgt = num(dailyTargetLevel);
     const epsilon = Math.max(100, tgt * 0.01);
     const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
     const revColor = hitTarget ? '#10B981' : '#EF4444';
@@ -600,11 +610,11 @@ const Dashboard = ({ overview }) => {
         <div className="font-medium mb-1">Day {label}</div>
         <div className="flex items-center justify-between gap-6">
           <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-black" /><span>Daily Target</span></div>
-          <span className="font-medium">{currency(pData.target)}</span>
+          <span className="font-medium">{currency(tgt)}</span>
         </div>
         <div className="flex items-center justify-between gap-6 mt-1">
           <div className="flex items-center gap-2"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} /><span>Actual Revenue</span></div>
-          <span className="font-medium" style={{ color: revColor }}>{currency(pData.revenue)}</span>
+          <span className="font-medium" style={{ color: revColor }}>{currency(rev)}</span>
         </div>
       </div>
     );
@@ -675,11 +685,23 @@ const Dashboard = ({ overview }) => {
                 <YAxis tick={Y_TICK_SMALL} />
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
-                <Bar dataKey="target" name="Daily Target" fill="#000000" />
+
+                {/* ✅ Single horizontal target line instead of black bars */}
+                {dailyTargetLevel > 0 && (
+                  <ReferenceLine
+                    y={dailyTargetLevel}
+                    stroke="#000"
+                    strokeWidth={2}
+                    strokeDasharray="3 3"
+                    label={{ value: `Target ${currency(dailyTargetLevel)}`, position: 'top', fill: '#000', fontSize: 12 }}
+                  />
+                )}
+
+                {/* Actual revenue bars (red/green per target hit) */}
                 <Bar dataKey="revenue" name="Actual Revenue">
                   {ov.dailyData.map((d, i) => {
                     const rev = num(d.revenue);
-                    const tgt = num(d.target);
+                    const tgt = num(dailyTargetLevel);
                     const epsilon = Math.max(100, tgt * 0.01);
                     const met = (d.met === true) || (rev + epsilon >= tgt);
                     return <Cell key={`rev-${i}`} fill={met ? '#10B981' : '#EF4444'} />;
