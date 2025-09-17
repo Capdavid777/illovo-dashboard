@@ -177,8 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  the // (no stray token)
-  const date = lookup(['date', 'dt', 'dayDate']);
+  const date = lookup(['date', 'dt', 'dayDate']); // fixed
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -387,6 +386,7 @@ const Dashboard = ({ overview }) => {
   const [monthOverview, setMonthOverview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
+  the
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
   const [lastUpdatedStr, setLastUpdatedStr] = useState('');
@@ -572,7 +572,7 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- Target line value (no legend item) ---------- */
+  /* ---------- Target line value ---------- */
   const dailyTargetLevel = useMemo(() => {
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
@@ -582,7 +582,7 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ legends & tooltips ------------------------------ */
 
-  // Legend now ONLY shows revenue, so that black target square is gone
+  // Legend now ONLY shows revenue
   const renderLegend = () => (
     <div className="flex items-center justify-center gap-6 mt-2 text-sm">
       <div className="flex items-center gap-2">
@@ -597,7 +597,6 @@ const Dashboard = ({ overview }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
     const rev = num(pData.revenue);
-    // Color per hit/miss vs target for visual context
     const tgt = num(dailyTargetLevel);
     const epsilon = Math.max(100, tgt * 0.01);
     const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
@@ -666,7 +665,6 @@ const Dashboard = ({ overview }) => {
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title */}
                 <text
                   x="50%"
                   y={18}
@@ -683,7 +681,7 @@ const Dashboard = ({ overview }) => {
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
 
-                {/* Single horizontal target line */}
+                {/* single horizontal target line */}
                 {dailyTargetLevel > 0 && (
                   <ReferenceLine
                     y={dailyTargetLevel}
@@ -771,7 +769,6 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* Title inside */}
                   <text
                     x="50%" y={18}
                     textAnchor="middle" dominantBaseline="middle"
@@ -818,7 +815,6 @@ const Dashboard = ({ overview }) => {
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  {/* Title inside */}
                   <text
                     x="50%" y={18}
                     textAnchor="middle" dominantBaseline="middle"
@@ -864,10 +860,10 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside */}
                 <text
                   x="50%" y={18}
-                  textAnchor="middle" dominantBaseline="middle"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
                   style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
                 >
                   Annual Revenue Trend
@@ -888,10 +884,10 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside */}
                 <text
                   x="50%" y={18}
-                  textAnchor="middle" dominantBaseline="middle"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
                   style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
                 >
                   Occupancy Trend
