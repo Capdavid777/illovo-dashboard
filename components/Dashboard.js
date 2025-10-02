@@ -269,6 +269,7 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
+  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined },
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
