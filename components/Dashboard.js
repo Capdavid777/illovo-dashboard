@@ -69,7 +69,7 @@ const fromKey = (key) => {
 const fmtMonth = (d) => d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
 
 function useMonthParam() {
-  const current = () => toKey(new Date()));
+  const current = () => toKey(new Date());
   const [month, setMonthState] = useState(() => {
     if (typeof window === 'undefined') return current();
     try { return new URL(window.location.href).searchParams.get('month') || current(); }
@@ -106,12 +106,12 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   };
 
   const options = (() => {
-    const out = [];
-    const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
-    const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
-    const cur = new Date(start);
-    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
-    return out.reverse();
+       const out = [];
+       const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
+       const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
+       const cur = new Date(start);
+       while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
+       return out.reverse();
   })();
 
   return (
@@ -269,7 +269,7 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
-  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined } // 👈 October added
+  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined },
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
@@ -460,7 +460,7 @@ const Dashboard = ({ overview }) => {
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
-          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); }
+          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading=false; }
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
         } else {
@@ -566,16 +566,19 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- Target line value (supports several data shapes) ---------- */
+  /* ---------- Target line value (now also reads top-level targets.daily_revenue_target) ---------- */
   const dailyTargetLevel = useMemo(() => {
-    // 1) explicit per-day targets
+    // 1) explicit per-day 'target' values in daily rows
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
-    // 2) derive from to-date / days in month
-    if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
-    // 3) explicit top-level daily target (if present in raw)
+
+    // 2) top-level daily target defined in the month JSON (e.g. public/data/2025-10.json)
     const top = num(monthOverview?.targets?.daily_revenue_target, NaN);
     if (Number.isFinite(top) && top > 0) return top;
+
+    // 3) derive from to-date / days in month (coarse fallback)
+    if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
+
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays, monthOverview]);
 
@@ -590,7 +593,6 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  // Tooltip shows ONLY the actual revenue value
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
     const pData = payload[0]?.payload || {};
@@ -663,6 +665,7 @@ const Dashboard = ({ overview }) => {
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                {/* Title inside */}
                 <text
                   x="50%"
                   y={18}
@@ -679,6 +682,7 @@ const Dashboard = ({ overview }) => {
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
 
+                {/* Target line */}
                 {dailyTargetLevel > 0 && (
                   <ReferenceLine
                     y={dailyTargetLevel}
@@ -689,6 +693,7 @@ const Dashboard = ({ overview }) => {
                   />
                 )}
 
+                {/* Actual revenue bars (red/green per target hit) */}
                 <Bar dataKey="revenue" name="Actual Revenue">
                   {ov.dailyData.map((d, i) => {
                     const rev = num(d.revenue);
@@ -709,14 +714,314 @@ const Dashboard = ({ overview }) => {
   );
 
   /* -------- Room Types -------- */
-  // [your existing Room Types view code remains unchanged from your file]
-  // -- snipped for brevity in this message --
-  // (Keep everything else in your original file below this point, as you had it. The only changes above were TARGETS and dailyTargetLevel.)
 
-  // ⬇️ DO NOT REMOVE what already exists in your file after this comment.
-  // (RoomTypesView, HistoricalView, and the main render remain exactly as in your original.)
-  
-  /* The remainder of your file from RoomTypesView through export default is unchanged */
+  const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
+    { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
+    { type: 'Deluxe Studio', rooms: 10, available: 310, sold: 132, revenue: 106226, rate: 804, occupancy: 43 },
+    { type: '1 Bed', rooms: 16, available: 496, sold: 260, revenue: 279620, rate: 1075, occupancy: 52 },
+    { type: '2 Bed', rooms: 7,  available: 217, sold: 130, revenue: 177729, rate: 1367, occupancy: 60 },
+  ];
+  const roomTypeData = roomTypeRaw.map((rt) => {
+    const available = num(rt.available, null);
+    const sold      = num(rt.sold, null);
+    const revenue   = num(rt.revenue, 0);
+    const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
+    const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
+    const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
+    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
+  });
+
+  const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
+  const rtTotalAvailable = roomTypeData.reduce((a, r) => a + num(r.available), 0);
+  const rtTotalSold      = roomTypeData.reduce((a, r) => a + num(r.sold), 0);
+  const rtWeightedADR    = rtTotalSold ? Math.round(rtTotalRevenue / rtTotalSold) : 0;
+  const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
+
+  const RoomTypesView = () => {
+    const [sortBy, setSortBy] = useState('revenue');
+    const [asc, setAsc] = useState(false);
+
+    const sorted = useMemo(() => {
+      const keyMap = {
+        revenue: (r) => num(r.revenue),
+        occupancy: (r) => num(r.occupancy),
+        rate: (r) => num(r.rate),
+        sold: (r) => num(r.sold),
+      };
+      const keyFn = keyMap[sortBy] || keyMap.revenue;
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
+    }, [roomTypeData, sortBy]);
+
+    useEffect(() => { if (asc) sorted.reverse(); }, [asc, sorted]);
+
+    return (
+      <div className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
+          <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
+          <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
+          <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="bg-white p-6 rounded-lg shadow-lg">
+            <h3 className="sr-only">Revenue by Room Type</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  <text
+                    x="50%" y={18}
+                    textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                  >
+                    Revenue by Room Type
+                  </text>
+
+                  <defs>
+                    {roomTypeData.map((r) => {
+                      const pal = getPalette(r.type);
+                      const id = gradIdFor(r.type);
+                      return (
+                        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1" key={id}>
+                          <stop offset="0%" stopColor={pal.start} />
+                          <stop offset="100%" stopColor={pal.end} />
+                        </linearGradient>
+                      );
+                    })}
+                  </defs>
+                  <Pie
+                    data={roomTypeData}
+                    cx="50%" cy="50%"
+                    labelLine={false}
+                    label={({ payload, percent, x, y, textAnchor }) => {
+                      const pal = getPalette(payload.type);
+                      return <text x={x} y={y} fill={pal.end} textAnchor={textAnchor} dominantBaseline="central">
+                        {payload.type} {(percent * 100).toFixed(0)}%
+                      </text>;
+                    }}
+                    outerRadius={80}
+                    dataKey="revenue"
+                  >
+                    {roomTypeData.map((r, idx) => (<Cell key={`cell-${idx}`} fill={`url(#${gradIdFor(r.type)})`} />))}
+                  </Pie>
+                  <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-lg shadow-lg">
+            <h3 className="sr-only">Occupancy vs ADR</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  <text
+                    x="50%" y={18}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                  >
+                    Occupancy vs ADR
+                  </text>
+
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="type" />
+                  <YAxis tick={Y_TICK_SMALL} />
+                  <RechartsTooltip formatter={(value, name) => {
+                    if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
+                    if (name === 'rate') return [currency(value), 'ADR'];
+                    return [value, name];
+                  }} />
+                  <Legend />
+                  <Bar dataKey="occupancy" fill="#10B981" name="Occupancy (%)" />
+                  <Bar dataKey="rate" fill="#3B82F6" name="ADR (R)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* -------- Historical -------- */
+
+  const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
+    { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
+    { year: '2023', roomsSold: 1115, occupancy: 61, revenue: 1881374, rate: 1687 },
+    { year: '2024', roomsSold: 759,  occupancy: 45, revenue: 701738,  rate: 925  },
+    { year: '2025', roomsSold: 569,  occupancy: 46, revenue: 593854,  rate: 1042 }
+  ];
+
+  const HistoricalView = () => (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h3 className="sr-only">Annual Revenue Trend</h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                <text
+                  x="50%" y={18}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                >
+                  Annual Revenue Trend
+                </text>
+
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="year" />
+                <YAxis tick={Y_TICK_SMALL} />
+                <RechartsTooltip formatter={(value) => [`${currency(value)}`, 'Revenue']} />
+                <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h3 className="sr-only">Occupancy Trend</h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={yearlyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                <text
+                  x="50%" y={18}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                >
+                  Occupancy Trend
+                </text>
+
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="year" />
+                <YAxis tick={Y_TICK_SMALL} />
+                <RechartsTooltip formatter={(value) => [`${Math.round(num(value))}%`, 'Occupancy']} />
+                <Line type="monotone" dataKey="occupancy" stroke="#10B981" strokeWidth={3} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow-lg">
+        <h3 className="text-lg font-semibold mb-4">Year-over-Year Comparison</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Year</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rooms Sold</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Occupancy</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Rate</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {yearlyData.map((y, i) => (
+                <tr key={y.year || i}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{y.year}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{num(y.roomsSold)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pct(asPercent(y.occupancy))}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.revenue)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currency(y.rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ------------------------------ header & layout ------------------------------ */
+
+  const tabs = [
+    { id: 'overview', name: 'Overview', icon: Activity },
+    { id: 'rooms', name: 'Room Types', icon: Home },
+    { id: 'historical', name: 'Historical', icon: Calendar },
+  ];
+
+  const Inspector = () => {
+    if (!showInspector) return null;
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
+          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle; hidden in production)</div>
+          {rawSlice && (
+            <>
+              <div><b>Raw slice:</b></div>
+              <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
+            </>
+          )}
+          <div><b>Derived:</b></div>
+          <pre className="overflow-auto">{JSON.stringify({
+            month,
+            arrearsDays: ARREARS_DAYS,
+            elapsedDays: mtdRows.length,
+            totalDays,
+            occToDatePct: Math.round(occToDatePct),
+            revenueProgressPct,
+            rateProgressPct,
+            arrMeanMTD,
+            arrWeightedMTD
+          }, null, 2)}</pre>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center gap-3">
+              <Image src="/rs-logo2.png" alt="Reserved Suites" width={40} height={40} priority />
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">Reserved Suites Illovo</h1>
+                <p className="text-sm text-gray-500">Revenue Dashboard</p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <MonthSwitcher monthKey={month} onChange={setMonth} minKey={minKey} maxKey={maxKey} />
+              <div className="text-right">
+                <p className="text-sm text-gray-500">Last Updated</p>
+                <p className="text-sm font-medium text-gray-900">{lastUpdatedStr || '—'}</p>
+                {sourceInfo && (
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Source: {sourceInfo.source || '—'} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Inspector />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="flex space-x-1">
+          {tabs.map((tab) => (
+            <button key={tab.id} onClick={() => setSelectedView(tab.id)}
+              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+              type="button" aria-current={selectedView === tab.id ? 'page' : undefined}>
+              <tab.icon className="w-4 h-4 mr-2" />{tab.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+        {selectedView === 'overview' && <OverviewView />}
+        {selectedView === 'rooms' && <RoomTypesView />}
+        {selectedView === 'historical' && <HistoricalView />}
+      </div>
+    </div>
+  );
 };
 
 export default Dashboard;
