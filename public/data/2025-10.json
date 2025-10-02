@@ -1,0 +1,54 @@
+{
+  "overview": {
+    "revenueToDate": 0,
+    "targetToDate": 0,
+    "averageRoomRate": 0,
+    "occupancyRate": 0,
+    "lastUpdated": "2025-10-02T00:00:00",
+    "daily": [
+      { "date": "2025-10-01", "day": 1,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-02", "day": 2,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-03", "day": 3,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-04", "day": 4,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-05", "day": 5,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-06", "day": 6,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-07", "day": 7,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-08", "day": 8,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-09", "day": 9,  "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-10", "day": 10, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-11", "day": 11, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-12", "day": 12, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-13", "day": 13, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-14", "day": 14, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-15", "day": 15, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-16", "day": 16, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-17", "day": 17, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-18", "day": 18, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-19", "day": 19, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-20", "day": 20, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-21", "day": 21, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-22", "day": 22, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-23", "day": 23, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-24", "day": 24, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-25", "day": 25, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-26", "day": 26, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-27", "day": 27, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-28", "day": 28, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-29", "day": 29, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-30", "day": 30, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 },
+      { "date": "2025-10-31", "day": 31, "target": 0, "revenue": 0, "occupancy": 0, "rate": 0 }
+    ],
+    "roomTypes": [
+      { "type": "Queen",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "Deluxe Studio", "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "1 Bed",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 },
+      { "type": "2 Bed",         "available": 0, "sold": 0, "revenue": 0, "rate": 0, "occupancy": 0 }
+    ],
+    "history": [
+      { "year": "2022", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2023", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2024", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 },
+      { "year": "2025", "roomsSold": 0, "occupancy": 0, "revenue": 0, "rate": 0 }
+    ]
+  }
+}
