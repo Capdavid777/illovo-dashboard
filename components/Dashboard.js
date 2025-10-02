@@ -38,7 +38,7 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const Y_TICK_SMALL = { fontSize: 11 };
 const isJson = (res) => (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 
-/* parse lastUpdated robustly */
+/* robust parse for timestamps */
 const parseLastUpdated = (v) => {
   if (v == null || v === '') return null;
   if (v instanceof Date) return Number.isNaN(v.valueOf()) ? null : v;
@@ -106,12 +106,12 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   };
 
   const options = (() => {
-       const out = [];
-       const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
-       const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
-       const cur = new Date(start);
-       while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
-       return out.reverse();
+    const out = [];
+    const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
+    const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
+    const cur = new Date(start);
+    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
+    return out.reverse();
   })();
 
   return (
@@ -269,7 +269,7 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
-  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined },
+  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // 👈 October added
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
@@ -460,7 +460,7 @@ const Dashboard = ({ overview }) => {
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
-          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading=false; }
+          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); } // ← fixed here
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
         } else {
@@ -566,19 +566,13 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- Target line value (now also reads top-level targets.daily_revenue_target) ---------- */
+  /* ---------- Target line (now supports top-level targets.daily_revenue_target) ---------- */
   const dailyTargetLevel = useMemo(() => {
-    // 1) explicit per-day 'target' values in daily rows
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
-
-    // 2) top-level daily target defined in the month JSON (e.g. public/data/2025-10.json)
     const top = num(monthOverview?.targets?.daily_revenue_target, NaN);
     if (Number.isFinite(top) && top > 0) return top;
-
-    // 3) derive from to-date / days in month (coarse fallback)
     if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
-
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays, monthOverview]);
 
@@ -637,7 +631,7 @@ const Dashboard = ({ overview }) => {
           icon={Users}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
-          tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
+          tooltip="Weighted occupancy to date (daily sold ÷ daily available)."
         />
         <MetricCard
           title="Average Room Rate"
@@ -646,7 +640,6 @@ const Dashboard = ({ overview }) => {
           icon={Home}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
-          tooltip="ARR = simple average of Daily tab's ARR values to date (matches spreadsheet)."
         />
         <MetricCard
           title="Target Variance"
@@ -655,7 +648,6 @@ const Dashboard = ({ overview }) => {
           icon={Target}
           chip={mtdChip}
           rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
-          tooltip="Variance uses the same to-date cutoff as Revenue."
         />
       </div>
 
@@ -665,7 +657,6 @@ const Dashboard = ({ overview }) => {
           {ov.dailyData?.length ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                {/* Title inside */}
                 <text
                   x="50%"
                   y={18}
@@ -682,7 +673,6 @@ const Dashboard = ({ overview }) => {
                 <RechartsTooltip content={<CustomTooltip />} />
                 <Legend content={renderLegend} />
 
-                {/* Target line */}
                 {dailyTargetLevel > 0 && (
                   <ReferenceLine
                     y={dailyTargetLevel}
@@ -693,7 +683,6 @@ const Dashboard = ({ overview }) => {
                   />
                 )}
 
-                {/* Actual revenue bars (red/green per target hit) */}
                 <Bar dataKey="revenue" name="Actual Revenue">
                   {ov.dailyData.map((d, i) => {
                     const rev = num(d.revenue);
