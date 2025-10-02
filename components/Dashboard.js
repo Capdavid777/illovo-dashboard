@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  the date = lookup(['date', 'dt', 'dayDate']);
+  const date = lookup(['date', 'dt', 'dayDate']); // ← fixed typo here
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -618,7 +618,6 @@ const Dashboard = ({ overview }) => {
       const maxRev = Math.max(0, ...((ov.dailyData || []).map(d => num(d.revenue, 0))));
       const tgt = num(dailyTargetLevel, 0);
       const m = Math.max(maxRev, tgt);
-      // round up a bit for headroom
       return m > 0 ? Math.ceil((m * 1.1) / 1000) * 1000 : 1000;
     }, [ov.dailyData, dailyTargetLevel]);
 
@@ -681,7 +680,6 @@ const Dashboard = ({ overview }) => {
 
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="day" />
-                  {/* 👇 force Y domain to include the target line */}
                   <YAxis tick={Y_TICK_SMALL} domain={[0, chartMaxY]} />
                   <RechartsTooltip content={<CustomTooltip />} />
                   <Legend content={renderLegend} />
