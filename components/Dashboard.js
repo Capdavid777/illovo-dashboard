@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']);
+  the date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -269,7 +269,7 @@ const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9
 const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
-  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // 👈 October added
+  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // October
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
@@ -460,7 +460,7 @@ const Dashboard = ({ overview }) => {
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
-          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); } // ← fixed here
+          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); }
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
         } else {
@@ -566,7 +566,7 @@ const Dashboard = ({ overview }) => {
   const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
   const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
 
-  /* ---------- Target line (now supports top-level targets.daily_revenue_target) ---------- */
+  /* ---------- Target line (supports top-level targets.daily_revenue_target) ---------- */
   const dailyTargetLevel = useMemo(() => {
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
     if (Number.isFinite(first)) return first;
@@ -612,95 +612,109 @@ const Dashboard = ({ overview }) => {
 
   /* ------------------------------ views ------------------------------ */
 
-  const OverviewView = () => (
-    <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard
-          title="Revenue to Date"
-          value={currency(ov.revenueToDate)}
-          subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
-          icon={DollarSign}
-          chip={mtdChip}
-          rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
-          tooltip="Completion vs daily target (to date)."
-        />
-        <MetricCard
-          title="Occupancy Rate"
-          value={pct(occToDatePct)}
-          subtitle={`vs ${pct(OCC_TARGET)} target`}
-          icon={Users}
-          chip={mtdChip}
-          rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
-          tooltip="Weighted occupancy to date (daily sold ÷ daily available)."
-        />
-        <MetricCard
-          title="Average Room Rate"
-          value={currency(averageRoomRateFinal)}
-          subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`}
-          icon={Home}
-          chip={mtdChip}
-          rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
-        />
-        <MetricCard
-          title="Target Variance"
-          value={currency(Math.abs(ov.targetVariance))}
-          subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
-          icon={Target}
-          chip={mtdChip}
-          rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
-        />
-      </div>
+  const OverviewView = () => {
+    // Ensure the Y-axis always includes the target line
+    const chartMaxY = useMemo(() => {
+      const maxRev = Math.max(0, ...((ov.dailyData || []).map(d => num(d.revenue, 0))));
+      const tgt = num(dailyTargetLevel, 0);
+      const m = Math.max(maxRev, tgt);
+      // round up a bit for headroom
+      return m > 0 ? Math.ceil((m * 1.1) / 1000) * 1000 : 1000;
+    }, [ov.dailyData, dailyTargetLevel]);
 
-      <div className="bg-white p-6 rounded-lg shadow-lg">
-        <h3 className="sr-only">Daily Revenue vs Target</h3>
-        <div className="h-80">
-          {ov.dailyData?.length ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                <text
-                  x="50%"
-                  y={18}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
-                >
-                  Daily Revenue vs Target
-                </text>
+    return (
+      <div className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <MetricCard
+            title="Revenue to Date"
+            value={currency(ov.revenueToDate)}
+            subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
+            icon={DollarSign}
+            chip={mtdChip}
+            rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
+            tooltip="Completion vs daily target (to date)."
+          />
+          <MetricCard
+            title="Occupancy Rate"
+            value={pct(occToDatePct)}
+            subtitle={`vs ${pct(OCC_TARGET)} target`}
+            icon={Users}
+            chip={mtdChip}
+            rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
+            tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
+          />
+          <MetricCard
+            title="Average Room Rate"
+            value={currency(averageRoomRateFinal)}
+            subtitle={`vs breakeven ${currency(ARR_BREAKEVEN)}`}
+            icon={Home}
+            chip={mtdChip}
+            rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
+            tooltip="ARR = simple average of Daily tab's ARR values to date (matches spreadsheet)."
+          />
+          <MetricCard
+            title="Target Variance"
+            value={currency(Math.abs(ov.targetVariance))}
+            subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
+            icon={Target}
+            chip={mtdChip}
+            rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
+            tooltip="Variance uses the same to-date cutoff as Revenue."
+          />
+        </div>
 
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" />
-                <YAxis tick={Y_TICK_SMALL} />
-                <RechartsTooltip content={<CustomTooltip />} />
-                <Legend content={renderLegend} />
+        <div className="bg-white p-6 rounded-lg shadow-lg">
+          <h3 className="sr-only">Daily Revenue vs Target</h3>
+          <div className="h-80">
+            {ov.dailyData?.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                  <text
+                    x="50%"
+                    y={18}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
+                  >
+                    Daily Revenue vs Target
+                  </text>
 
-                {dailyTargetLevel > 0 && (
-                  <ReferenceLine
-                    y={dailyTargetLevel}
-                    stroke="#000"
-                    strokeWidth={2}
-                    strokeDasharray="3 3"
-                    label={{ value: `Target ${currency(dailyTargetLevel)}`, position: 'top', fill: '#000', fontSize: 12 }}
-                  />
-                )}
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="day" />
+                  {/* 👇 force Y domain to include the target line */}
+                  <YAxis tick={Y_TICK_SMALL} domain={[0, chartMaxY]} />
+                  <RechartsTooltip content={<CustomTooltip />} />
+                  <Legend content={renderLegend} />
 
-                <Bar dataKey="revenue" name="Actual Revenue">
-                  {ov.dailyData.map((d, i) => {
-                    const rev = num(d.revenue);
-                    const tgt = num(dailyTargetLevel);
-                    const epsilon = Math.max(100, tgt * 0.01);
-                    const met = (d.met === true) || (rev + epsilon >= tgt);
-                    return <Cell key={`rev-${i}`} fill={met ? '#10B981' : '#EF4444'} />;
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex items-center justify-center text-gray-500">No daily data yet.</div>
-          )}
+                  {dailyTargetLevel > 0 && (
+                    <ReferenceLine
+                      y={dailyTargetLevel}
+                      stroke="#000"
+                      strokeWidth={2}
+                      strokeDasharray="3 3"
+                      label={{ value: `Target ${currency(dailyTargetLevel)}`, position: 'top', fill: '#000', fontSize: 12 }}
+                    />
+                  )}
+
+                  <Bar dataKey="revenue" name="Actual Revenue">
+                    {ov.dailyData.map((d, i) => {
+                      const rev = num(d.revenue);
+                      const tgt = num(dailyTargetLevel);
+                      const epsilon = Math.max(100, tgt * 0.01);
+                      const met = (d.met === true) || (rev + epsilon >= tgt);
+                      return <Cell key={`rev-${i}`} fill={met ? '#10B981' : '#EF4444'} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">No daily data yet.</div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   /* -------- Room Types -------- */
 
