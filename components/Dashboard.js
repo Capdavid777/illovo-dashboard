@@ -270,7 +270,7 @@ const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
   "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // October
-  "2025-11": { occupancyPct: 50, arrBreakeven: 1380, revenue: undefined }, // November
+  "2025-11": { occupancyPct: 48, arrBreakeven: 1414, revenue: undefined }, // November
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
