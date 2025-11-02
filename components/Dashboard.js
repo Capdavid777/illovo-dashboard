@@ -270,6 +270,7 @@ const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
   "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // October
+  "2025-11": { occupancyPct: 50, arrBreakeven: 1380, revenue: undefined }, // November
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
@@ -320,7 +321,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
 
   const angle = (t / 100) * 2 * Math.PI - Math.PI / 2;
   const cx = size / 2 + radius * Math.cos(angle);
-  const cy = size / 2 + radius * Math.sin(angle);
+  const cy = size / 2 * 1 + radius * Math.sin(angle);
 
   const met = p >= t;
   const progColor = met ? '#10B981' : '#EF4444';
