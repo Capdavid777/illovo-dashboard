@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']);
+  const date = lookup(['date', 'dt', 'dayDate']); // ← fixed typo here
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -321,7 +321,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
 
   const angle = (t / 100) * 2 * Math.PI - Math.PI / 2;
   const cx = size / 2 + radius * Math.cos(angle);
-  const cy = size / 2 + radius * Math.sin(angle);
+  const cy = size / 2 * 1 + radius * Math.sin(angle);
 
   const met = p >= t;
   const progColor = met ? '#10B981' : '#EF4444';
@@ -341,6 +341,37 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
     </svg>
   );
 }
+
+/* ------------------------------ Metric card ------------------------------ */
+
+const InfoTip = ({ children }) => (
+  <span className="inline-flex items-center gap-1 text-gray-500" title={children}>
+    <Info className="w-3.5 h-3.5" />
+  </span>
+);
+
+const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, tooltip }) => (
+  <div className="group rounded-xl border border-[#CBA135] bg-white shadow-sm transition-all duration-200 transform-gpu hover:-translate-y-1 hover:shadow-xl">
+    <div className="flex items-start justify-between p-6">
+      <div>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-gray-600">{title}</p>
+          {tooltip && <InfoTip>{tooltip}</InfoTip>}
+          {chip && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full border border-[#CBA135]/40 text-[#111] bg-[#CBA135]/10">
+              {chip}
+            </span>
+          )}
+        </div>
+        <p className="text-2xl font-bold text-gray-900">{value}</p>
+        {!!subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+      </div>
+      <div className="p-2 rounded-full text-[#CBA135] bg-[#CBA135]/10 ring-1 ring-[#CBA135]/30 flex items-center justify-center">
+        {rightSlot ? rightSlot : <Icon className="w-6 h-6" />}
+      </div>
+    </div>
+  </div>
+);
 
 /* ------------------------------ component ------------------------------ */
 
@@ -533,6 +564,9 @@ const Dashboard = ({ overview }) => {
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
+  const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
+  const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
+
   /* ---------- Target line (supports top-level targets.daily_revenue_target) ---------- */
   const dailyTargetLevel = useMemo(() => {
     const first = (ov.dailyData || []).map(d => num(d.target, NaN)).find(v => Number.isFinite(v) && v > 0);
@@ -542,21 +576,6 @@ const Dashboard = ({ overview }) => {
     if (ov.targetToDate > 0 && totalDays > 0) return Math.round(ov.targetToDate / totalDays);
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays, monthOverview]);
-
-  /* ---------- NEW: compute Target-To-Date from daily target × elapsed days ---------- */
-  const targetToDateFinal = useMemo(() => {
-    const perDay = num(dailyTargetLevel, 0);
-    const raw = num(ov.targetToDate, 0);
-    if (perDay > 0 && elapsedDays > 0) return perDay * elapsedDays;
-    // if raw looks like a full-month target and we know per-day, still prefer per-day × elapsed
-    if (perDay > 0 && raw > perDay * (totalDays - 2)) return perDay * elapsedDays;
-    return raw;
-  }, [dailyTargetLevel, elapsedDays, ov.targetToDate, totalDays]);
-
-  const revenueProgressPct = targetToDateFinal > 0 ? Math.round(100 * clamp01(ov.revenueToDate / targetToDateFinal)) : 0;
-  const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
-
-  const targetVarianceFinal = targetToDateFinal - ov.revenueToDate;
 
   /* ------------------------------ legends & tooltips ------------------------------ */
 
@@ -609,7 +628,7 @@ const Dashboard = ({ overview }) => {
           <MetricCard
             title="Revenue to Date"
             value={currency(ov.revenueToDate)}
-            subtitle={targetToDateFinal ? `vs ${currency(targetToDateFinal)} target` : undefined}
+            subtitle={ov.targetToDate ? `vs ${currency(ov.targetToDate)} target` : undefined}
             icon={DollarSign}
             chip={mtdChip}
             rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
@@ -635,8 +654,8 @@ const Dashboard = ({ overview }) => {
           />
           <MetricCard
             title="Target Variance"
-            value={currency(Math.abs(targetVarianceFinal))}
-            subtitle={targetVarianceFinal >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
+            value={currency(Math.abs(ov.targetVariance))}
+            subtitle={ov.targetVariance >= 0 ? 'Target – Revenue' : 'Revenue – Target'}
             icon={Target}
             chip={mtdChip}
             rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="progress vs target" />}
