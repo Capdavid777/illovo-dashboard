@@ -393,6 +393,9 @@ const Dashboard = ({ overview }) => {
   })();
   const showInspector = (process.env.NODE_ENV !== 'production') && inspectOnQuery;
 
+  // NEW: Always require ?inspect=1 to show the source line (even in production).
+  const showSourceLine = inspectOnQuery;
+
   /* fetch bounds */
   useEffect(() => {
     let alive = true;
@@ -992,7 +995,8 @@ const Dashboard = ({ overview }) => {
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
                 <p className="text-sm font-medium text-gray-900">{lastUpdatedStr || '—'}</p>
-                {sourceInfo && (
+                {/* Source line is hidden from users; only visible when URL has ?inspect=1 */}
+                {showSourceLine && sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source || '—'} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
                   </p>
