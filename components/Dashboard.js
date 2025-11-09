@@ -393,7 +393,7 @@ const Dashboard = ({ overview }) => {
   })();
   const showInspector = (process.env.NODE_ENV !== 'production') && inspectOnQuery;
 
-  // NEW: Always require ?inspect=1 to show the source line (even in production).
+  // Only show the source line in ?inspect=1.
   const showSourceLine = inspectOnQuery;
 
   /* fetch bounds */
@@ -1012,10 +1012,23 @@ const Dashboard = ({ overview }) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex space-x-1">
           {tabs.map((tab) => (
-            <button key={tab.id} onClick={() => setSelectedView(tab.id)}
-              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedView === tab.id ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-              type="button" aria-current={selectedView === tab.id ? 'page' : undefined}>
-              <tab.icon className="w-4 h-4 mr-2" />{tab.name}
+            <button
+              key={tab.id}
+              onClick={() => setSelectedView(tab.id)}
+              type="button"
+              aria-current={selectedView === tab.id ? 'page' : undefined}
+              /* 
+                 CHANGE: default (non-active) tabs = gold bg with white text/icons,
+                 on hover text/icons turn black; active tab remains black/white.
+              */
+              className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                ${selectedView === tab.id
+                  ? 'bg-black text-white'
+                  : 'bg-[#CBA135] text-white hover:text-black'}
+              `}
+            >
+              <tab.icon className="w-4 h-4 mr-2" />
+              {tab.name}
             </button>
           ))}
         </div>
