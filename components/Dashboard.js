@@ -177,7 +177,7 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
-  const date = lookup(['date', 'dt', 'dayDate']); // ← fixed typo here
+  const date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
@@ -563,6 +563,11 @@ const Dashboard = ({ overview }) => {
 
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
+  // NEW: how much of the occupancy target has been achieved (ring shows this)
+  const occTargetAchievedPct = OCC_TARGET > 0
+    ? Math.round(100 * clamp01(occToDatePct / OCC_TARGET))
+    : 0;
+
   const elapsedDays = mtdRows.length;
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
@@ -635,7 +640,7 @@ const Dashboard = ({ overview }) => {
             icon={DollarSign}
             chip={mtdChip}
             rightSlot={<ProgressRing percent={revenueProgressPct} target={100} label="revenue progress" />}
-            tooltip="Completion vs daily target (to date)."
+            tooltip="Ring shows % of revenue target achieved (to date)."
           />
           <MetricCard
             title="Occupancy Rate"
@@ -643,8 +648,9 @@ const Dashboard = ({ overview }) => {
             subtitle={`vs ${pct(OCC_TARGET)} target`}
             icon={Users}
             chip={mtdChip}
-            rightSlot={<ProgressRing percent={occToDatePct} target={OCC_TARGET} label="occupancy progress" />}
-            tooltip="Weighted occupancy to date (daily sold ÷ daily available), cutoff: yesterday 23:59."
+            // NEW: ring now shows % of the occupancy target achieved (not the raw occupancy)
+            rightSlot={<ProgressRing percent={occTargetAchievedPct} target={100} label="occupancy vs target" />}
+            tooltip="Ring shows % of occupancy target achieved (weighted; cutoff yesterday 23:59)."
           />
           <MetricCard
             title="Average Room Rate"
@@ -653,7 +659,7 @@ const Dashboard = ({ overview }) => {
             icon={Home}
             chip={mtdChip}
             rightSlot={<ProgressRing percent={rateProgressPct} target={100} label="rate vs breakeven" />}
-            tooltip="ARR = simple average of Daily tab's ARR values to date (matches spreadsheet)."
+            tooltip="Ring shows % of ARR breakeven achieved."
           />
           <MetricCard
             title="Target Variance"
@@ -967,6 +973,7 @@ const Dashboard = ({ overview }) => {
             elapsedDays: mtdRows.length,
             totalDays,
             occToDatePct: Math.round(occToDatePct),
+            occTargetAchievedPct,
             revenueProgressPct,
             rateProgressPct,
             arrMeanMTD,
@@ -1017,10 +1024,6 @@ const Dashboard = ({ overview }) => {
               onClick={() => setSelectedView(tab.id)}
               type="button"
               aria-current={selectedView === tab.id ? 'page' : undefined}
-              /* 
-                 CHANGE: default (non-active) tabs = gold bg with white text/icons,
-                 on hover text/icons turn black; active tab remains black/white.
-              */
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors
                 ${selectedView === tab.id
                   ? 'bg-black text-white'
