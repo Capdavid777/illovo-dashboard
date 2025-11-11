@@ -12,7 +12,7 @@ import {
   SlidersHorizontal, Info
 } from 'lucide-react';
 
-/* --------------------------------- helpers --------------------------------- */
+/* ------------------------------ helpers ------------------------------ */
 
 const num = (v, d = 0) => {
   if (v == null) return d;
@@ -53,12 +53,13 @@ const parseLastUpdated = (v) => {
   return Number.isNaN(d.valueOf()) ? null : d;
 };
 
-/* --------------------------------- config ---------------------------------- */
-const ARREARS_DAYS = Number.isFinite(Number(process.env.NEXT_PUBLIC_ARREARS_DAYS))
-  ? Number(process.env.NEXT_PUBLIC_ARREARS_DAYS)
-  : 1;
+/* ------------------------------ arrears setting ------------------------------ */
+const ARREARS_DAYS = (() => {
+  const v = typeof process !== 'undefined' ? Number(process.env.NEXT_PUBLIC_ARREARS_DAYS) : NaN;
+  return Number.isFinite(v) ? v : 1;
+})();
 
-/* ------------------------------- month utils ------------------------------- */
+/* ------------------------------ month utils ------------------------------ */
 const pad2 = (n) => String(n).padStart(2, '0');
 const toKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 const fromKey = (key) => {
@@ -86,11 +87,13 @@ function useMonthParam() {
   };
   return { month, setMonth };
 }
+
 const daysInMonth = (monthKey) => {
   const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
   return new Date(y, m, 0).getDate();
 };
 
+/* ------------------------------ Month switcher ------------------------------ */
 function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   const d = fromKey(monthKey);
   const prev = () => {
@@ -103,12 +106,14 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   };
 
   const options = (() => {
-    const out = [];
-    const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
-    const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
-    const cur = new Date(start);
-    while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
-    return out.reverse();
+    do {
+      const out = [];
+      const start = minKey ? fromKey(minKey) : new Date(d.getFullYear() - 1, 0, 1);
+      const end   = maxKey ? fromKey(maxKey) : new Date(d.getFullYear() + 1, 11, 1);
+      const cur = new Date(start);
+      while (cur <= end) { out.push(toKey(cur)); cur.setMonth(cur.getMonth() + 1); }
+      return out.reverse();
+    } while(false);
   })();
 
   return (
@@ -120,6 +125,7 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
         value={monthKey}
         onChange={(e) => onChange(e.target.value)}
         className="ml-2 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-900"
+        style={{ color: '#111827' }}
         aria-label="Jump to month"
       >
         {options.map((k) => (<option key={k} value={k}>{fmtMonth(fromKey(k))}</option>))}
@@ -128,14 +134,13 @@ function MonthSwitcher({ monthKey, onChange, minKey, maxKey }) {
   );
 }
 
-/* ---------------------------- normalization utils --------------------------- */
+/* ------------------------------ deep helpers for normalization ------------------------------ */
 
 function sniffDailyArray(raw) {
   if (!raw || typeof raw !== 'object') return [];
   const candidates = [];
   const directKeys = ['dailySeries', 'daily', 'items', 'rows', 'days', 'data'];
   for (const k of directKeys) if (Array.isArray(raw[k])) candidates.push(raw[k]);
-
   const objDaily = raw.daily || raw.days || null;
   if (objDaily && !Array.isArray(objDaily) && typeof objDaily === 'object') {
     const keys = Object.keys(objDaily).filter((k) => /^\d+$/.test(k));
@@ -175,7 +180,7 @@ function mapDailyRow(d, i) {
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
   const date = lookup(['date', 'dt', 'dayDate']);
-  const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
+  const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
   const rate    = num(lookup(['rate','arr','adr','averageRate','avgRate']), NaN);
   const occVal  = lookup(['occupancy','occ','occupancyRate','occRate','occ%']);
@@ -192,6 +197,8 @@ function mapDailyRow(d, i) {
     met: metFlag === true || metFlag === 'true' || metFlag === 1 ? true : undefined,
   };
 }
+
+/* ------------------------------ normalization ------------------------------ */
 
 function normalizeOverview(raw = {}) {
   const get = (keys, fallback) => {
@@ -248,7 +255,7 @@ function normalizeOverview(raw = {}) {
   };
 }
 
-/* -------------------------------- palettes --------------------------------- */
+/* ------------------------------ palettes ------------------------------ */
 
 const ROOM_PALETTES = {
   '2 Bed':         { start: '#0A2240', end: '#0F2E5E' },
@@ -260,19 +267,18 @@ const ROOM_PALETTES = {
 const getPalette = (type) => ROOM_PALETTES[type] || { start: '#64748B', end: '#475569' };
 const gradIdFor = (type) => `grad-${String(type).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
-/* -------------------------------- targets ---------------------------------- */
+/* ------------------------------ Month targets ------------------------------ */
 const TARGETS = {
   default: { occupancyPct: 62, arrBreakeven: 1237, revenue: undefined },
   "2025-09": { occupancyPct: 52, arrBreakeven: 1395, revenue: undefined },
-  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined },
-  "2025-11": { occupancyPct: 48, arrBreakeven: 1414, revenue: undefined },
+  "2025-10": { occupancyPct: 49, arrBreakeven: 1378, revenue: undefined }, // October
+  "2025-11": { occupancyPct: 48, arrBreakeven: 1414, revenue: undefined }, // November
 };
 function getTargetsForMonth(monthKey) {
   return TARGETS[monthKey] || TARGETS.default;
 }
 
-/* --------------------------- derived calculations -------------------------- */
-
+/* ------------------------------ Occupancy to-date (weighted) ------------------------------ */
 function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay = 60) {
   if (!Array.isArray(dailyRows) || dailyRows.length === 0) return 0;
 
@@ -317,7 +323,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
 
   const angle = (t / 100) * 2 * Math.PI - Math.PI / 2;
   const cx = size / 2 + radius * Math.cos(angle);
-  const cy = size / 2 + radius * Math.sin(angle);
+  const cy = size / 2 * 1 + radius * Math.sin(angle);
 
   const met = p >= t;
   const progColor = met ? '#10B981' : '#EF4444';
@@ -338,7 +344,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
   );
 }
 
-/* ------------------------------- UI elements ------------------------------- */
+/* ------------------------------ Metric card ------------------------------ */
 
 const InfoTip = ({ children }) => (
   <span className="inline-flex items-center gap-1 text-gray-500" title={children}>
@@ -369,13 +375,14 @@ const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, toolt
   </div>
 );
 
-/* --------------------------------- main ------------------------------------ */
+/* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
   const { month, setMonth } = useMonthParam();
   const [minKey, setMinKey] = useState();
   const [maxKey, setMaxKey] = useState();
   const [monthOverview, setMonthOverview] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState('overview');
   const [sourceInfo, setSourceInfo] = useState(null);
   const [rawSlice, setRawSlice] = useState(null);
@@ -403,9 +410,10 @@ const Dashboard = ({ overview }) => {
     return () => { alive = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* fetch month data (multi-source with fallbacks) */
+  /* fetch month data (multi-source) */
   useEffect(() => {
     let alive = true;
+    setLoading(true);
     setSourceInfo(null);
     setRawSlice(null);
 
@@ -429,12 +437,13 @@ const Dashboard = ({ overview }) => {
         const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
           setMonthOverview(r1.json?.overview ? r1.json.overview : r1.json);
+          setLoading(false);
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
         } else {
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: r1.jsonCt, skipped: true });
         }
-      } catch (e) { record({ source: 'admin-bucket', error: String(e) }); }
+      } catch {}
 
       try {
         const [ov, dm] = await Promise.all([
@@ -448,25 +457,24 @@ const Dashboard = ({ overview }) => {
             (dmJson && (dmJson.daily || dmJson.rows || dmJson.items || dmJson.data || (Array.isArray(dmJson) ? dmJson : null))) || [];
           const merged = { ...(ovJson?.overview || ovJson || {}), daily };
           setMonthOverview(merged);
+          setLoading(false);
           record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ovStatus: ov.status, dmStatus: dm.status, json: { ov: ov.ok, dm: dm.ok } });
           return;
-        } else {
-          record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ov: { status: ov.status }, dm: { status: dm.status }, skipped: true });
         }
-      } catch (e) { record({ source: 'admin-db', error: String(e) }); }
+      } catch {}
 
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
           setMonthOverview(r2.json?.overview || r2.json || null);
+          setLoading(false);
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
-        } else {
-          record({ source: 'static (/public/data)', status: r2.status, json: r2.jsonCt, skipped: true });
         }
-      } catch (e) { record({ source: 'static (/public/data)', error: String(e) }); }
+      } catch {}
 
       setMonthOverview(null);
+      setLoading(false);
     })();
 
     return () => { alive = false; };
@@ -508,7 +516,7 @@ const Dashboard = ({ overview }) => {
     setLastUpdatedStr(str);
   }, [ov?.lastUpdated, ov?.dailyData, month, monthOverview?.lastUpdated, overview?.lastUpdated]);
 
-  /* ------------------------------ aggregates ------------------------------- */
+  /* ------------------------------ derived aggregates ------------------------------ */
 
   const cutoffDate = useMemo(() => {
     const d = new Date();
@@ -557,7 +565,6 @@ const Dashboard = ({ overview }) => {
 
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
-  // ring shows % of occupancy target achieved
   const occTargetAchievedPct = OCC_TARGET > 0
     ? Math.round(100 * clamp01(occToDatePct / OCC_TARGET))
     : 0;
@@ -579,9 +586,9 @@ const Dashboard = ({ overview }) => {
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays, monthOverview]);
 
-  /* ------------------------------ alignment bits --------------------------- */
+  /* ------------------------------ legends & tooltips ------------------------------ */
 
-  // Legend perfectly centered to the inner plot (accounts for chart margins)
+  // Legend perfectly centered to the inner plot area (accounts for margins)
   const AlignedLegend = (props) => {
     const left = props?.margin?.left || 0;
     const right = props?.margin?.right || 0;
@@ -596,12 +603,35 @@ const Dashboard = ({ overview }) => {
     );
   };
 
-  // Target label perfectly centered above the line (raised a little)
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload || !payload.length) return null;
+    const pData = payload[0]?.payload || {};
+    const rev = num(pData.revenue);
+    const tgt = num(dailyTargetLevel);
+    const epsilon = Math.max(100, tgt * 0.01);
+    const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
+    const revColor = hitTarget ? '#10B981' : '#EF4444';
+
+    return (
+      <div className="rounded-md bg-white shadow border p-3 text-sm">
+        <div className="font-medium mb-1">Day {label}</div>
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} />
+            <span>Actual Revenue</span>
+          </div>
+          <span className="font-medium" style={{ color: revColor }}>{currency(rev)}</span>
+        </div>
+      </div>
+    );
+  };
+
+  /* ------- centered target label for ReferenceLine (raised) ------- */
   const CenteredTargetLabel = ({ viewBox, value }) => {
     if (!viewBox) return null;
-    const { x, width, y } = viewBox;      // viewBox is in inner-plot coords
-    const cx = x + width / 2;             // exact middle of the plot
-    const yOffset = 14;                   // raise label above line
+    const { x, width, y } = viewBox;      // inner-plot coords
+    const cx = x + width / 2;
+    const yOffset = 14;                    // raise label higher above the line
     return (
       <text
         x={cx}
@@ -615,9 +645,7 @@ const Dashboard = ({ overview }) => {
     );
   };
 
-  const chartMargin = { top: 40, right: 16, bottom: 32, left: 8 };
-
-  /* --------------------------------- views ---------------------------------- */
+  /* ------------------------------ views ------------------------------ */
 
   const OverviewView = () => {
     // Ensure the Y-axis always includes the target line
@@ -674,8 +702,8 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             {ov.dailyData?.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ov.dailyData} margin={chartMargin}>
-                  {/* Title is centered to the plot area */}
+                <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 32, left: 8 }}>
+                  {/* Title centered (close to plot center) */}
                   <text
                     x="50%"
                     y={18}
@@ -689,29 +717,9 @@ const Dashboard = ({ overview }) => {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="day" />
                   <YAxis tick={Y_TICK_SMALL} domain={[0, chartMaxY]} />
-                  <RechartsTooltip content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null;
-                    const pData = payload[0]?.payload || {};
-                    const rev = num(pData.revenue);
-                    const tgt = num(dailyTargetLevel);
-                    const epsilon = Math.max(100, tgt * 0.01);
-                    const hitTarget = (pData.met === true) || (rev + epsilon >= tgt);
-                    const revColor = hitTarget ? '#10B981' : '#EF4444';
-                    return (
-                      <div className="rounded-md bg-white shadow border p-3 text-sm">
-                        <div className="font-medium mb-1">Day {label}</div>
-                        <div className="flex items-center justify-between gap-6">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: revColor }} />
-                            <span>Actual Revenue</span>
-                          </div>
-                          <span className="font-medium" style={{ color: revColor }}>{currency(rev)}</span>
-                        </div>
-                      </div>
-                    );
-                  }} />
+                  <RechartsTooltip content={<CustomTooltip />} />
 
-                  {/* Bars first */}
+                  {/* Bars first... */}
                   <Bar dataKey="revenue" name="Actual Revenue">
                     {ov.dailyData.map((d, i) => {
                       const rev = num(d.revenue);
@@ -722,7 +730,7 @@ const Dashboard = ({ overview }) => {
                     })}
                   </Bar>
 
-                  {/* Target line drawn on top; label centered and raised */}
+                  {/* ...then target line so it renders ON TOP of bars */}
                   {dailyTargetLevel > 0 && (
                     <ReferenceLine
                       y={dailyTargetLevel}
@@ -734,8 +742,12 @@ const Dashboard = ({ overview }) => {
                     />
                   )}
 
-                  {/* Legend centered to the plot area */}
-                  <Legend verticalAlign="bottom" align="center" content={(props) => <AlignedLegend {...props} />} />
+                  {/* Legend centered to plot area */}
+                  <Legend
+                    verticalAlign="bottom"
+                    align="center"
+                    content={(props) => <AlignedLegend {...props} />}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -747,7 +759,7 @@ const Dashboard = ({ overview }) => {
     );
   };
 
-  /* ------------------------------- Room Types ------------------------------- */
+  /* -------- Room Types -------- */
 
   const roomTypeRaw = Array.isArray(ov.roomTypes) && ov.roomTypes.length ? ov.roomTypes : [
     { type: 'Queen', rooms: 26, available: 806, sold: 274, revenue: 233853, rate: 853, occupancy: 34 },
@@ -772,10 +784,26 @@ const Dashboard = ({ overview }) => {
   const rtAvgOcc         = rtTotalAvailable ? Math.round((rtTotalSold / rtTotalAvailable) * 100) : 0;
 
   const RoomTypesView = () => {
+    const [sortBy, setSortBy] = useState('revenue');
+    const [asc, setAsc] = useState(false);
+
+    const sorted = useMemo(() => {
+      const keyMap = {
+        revenue: (r) => num(r.revenue),
+        occupancy: (r) => num(r.occupancy),
+        rate: (r) => num(r.rate),
+        sold: (r) => num(r.sold),
+      };
+      const keyFn = keyMap[sortBy] || keyMap.revenue;
+      return [...roomTypeData].sort((a, b) => keyFn(b) - keyFn(a));
+    }, [roomTypeData, sortBy]);
+
+    useEffect(() => { if (asc) sorted.reverse(); }, [asc, sorted]);
+
     return (
       <div className="space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <MetricCard title="Room Types" value={roomTypeData.length} subtitle="Active types" icon={SlidersHorizontal} />
+          <MetricCard title="Room Types" value={sorted.length} subtitle="Active types" icon={SlidersHorizontal} />
           <MetricCard title="Revenue MTD" value={currency(rtTotalRevenue)} subtitle="Across all types" icon={DollarSign} />
           <MetricCard title="Weighted ADR" value={currency(rtWeightedADR)} subtitle="Revenue ÷ sold" icon={Home} />
           <MetricCard title="Avg Occupancy" value={pct(rtAvgOcc)} subtitle="Sold ÷ available" icon={Users} />
@@ -862,7 +890,7 @@ const Dashboard = ({ overview }) => {
     );
   };
 
-  /* ------------------------------- Historical ------------------------------- */
+  /* -------- Historical -------- */
 
   const yearlyData = Array.isArray(ov.history) && ov.history.length ? ov.history : [
     { year: '2022', roomsSold: 474, occupancy: 26, revenue: 573668, rate: 1210 },
@@ -953,7 +981,7 @@ const Dashboard = ({ overview }) => {
     </div>
   );
 
-  /* ------------------------------- layout/UI ------------------------------- */
+  /* ------------------------------ header & layout ------------------------------ */
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: Activity },
@@ -961,28 +989,31 @@ const Dashboard = ({ overview }) => {
     { id: 'historical', name: 'Historical', icon: Calendar },
   ];
 
-  // Optional inspector (dev only)
   const Inspector = () => {
     if (!showInspector) return null;
-    const [minimized, setMinimized] = useState(true);
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs">
-          <div className="flex items-center gap-3">
-            <b>Inspector</b>
-            <button className="px-2 py-0.5 border rounded" onClick={() => setMinimized(m => !m)}>{minimized ? 'Open' : 'Close'}</button>
-          </div>
-          {!minimized && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded p-3 text-xs space-y-2">
+          <div><b>Inspector</b> (add <code>&inspect=1</code> to toggle; hidden in production)</div>
+          {rawSlice && (
             <>
-              {rawSlice && (
-                <>
-                  <div className="mt-2"><b>Raw slice:</b></div>
-                  <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
-                </>
-              )}
-              <div className="mt-2"><b>Source:</b> {sourceInfo ? JSON.stringify(sourceInfo) : '—'}</div>
+              <div><b>Raw slice:</b></div>
+              <pre className="overflow-auto">{JSON.stringify(rawSlice.slice, null, 2)}</pre>
             </>
           )}
+          <div><b>Derived:</b></div>
+          <pre className="overflow-auto">{JSON.stringify({
+            month,
+            arrearsDays: ARREARS_DAYS,
+            elapsedDays: mtdRows.length,
+            totalDays,
+            occToDatePct: Math.round(occToDatePct),
+            occTargetAchievedPct,
+            revenueProgressPct,
+            rateProgressPct,
+            arrMeanMTD,
+            arrWeightedMTD
+          }, null, 2)}</pre>
         </div>
       </div>
     );
@@ -1021,7 +1052,7 @@ const Dashboard = ({ overview }) => {
       <Inspector />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex space-x-2">
+        <div className="flex space-x-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -1029,7 +1060,7 @@ const Dashboard = ({ overview }) => {
               type="button"
               aria-current={selectedView === tab.id ? 'page' : undefined}
               className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                ${selectedView === 'overview' && tab.id === 'overview'
+                ${selectedView === tab.id
                   ? 'bg-black text-white'
                   : 'bg-[#CBA135] text-white hover:text-black'}
               `}
