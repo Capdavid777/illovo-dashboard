@@ -177,6 +177,8 @@ function mapDailyRow(d, i) {
   };
 
   const day = num(lookup(['day', 'd', 'dateDay']), NaN);
+  theDate: {
+  }
   const date = lookup(['date', 'dt', 'dayDate']);
   const revenue = num(lookup(['revenue','actual','actualRevenue','accommodationRevenue','accommRevenue','accomRevenue','accRevenue','totalRevenue','rev','income']), NaN);
   const target  = num(lookup(['target','dailyTarget','targetRevenue','budget','goal','forecast']), NaN);
@@ -393,7 +395,7 @@ const Dashboard = ({ overview }) => {
   })();
   const showInspector = (process.env.NODE_ENV !== 'production') && inspectOnQuery;
 
-  // Only show the source line in ?inspect=1.
+  // Only show the source line in ?inspect=1 (hidden for users).
   const showSourceLine = inspectOnQuery;
 
   /* fetch bounds */
@@ -434,7 +436,8 @@ const Dashboard = ({ overview }) => {
       try {
         const r1 = await tryJson(`/api/month?month=${month}`, 'admin-bucket');
         if (r1.ok) {
-          if (alive) { setMonthOverview(r1.json?.overview ? r1.json.overview : r1.json); setLoading(false); }
+          setMonthOverview(r1.json?.overview ? r1.json.overview : r1.json);
+          setLoading(false);
           record({ source: 'admin-bucket (/api/month)', status: r1.status, json: true });
           return;
         } else {
@@ -453,7 +456,8 @@ const Dashboard = ({ overview }) => {
           const daily =
             (dmJson && (dmJson.daily || dmJson.rows || dmJson.items || dmJson.data || (Array.isArray(dmJson) ? dmJson : null))) || [];
           const merged = { ...(ovJson?.overview || ovJson || {}), daily };
-          if (alive) { setMonthOverview(merged); setLoading(false); }
+          setMonthOverview(merged);
+          setLoading(false);
           record({ source: 'admin-db (/api/overview + /api/daily-metrics)', ovStatus: ov.status, dmStatus: dm.status, json: { ov: ov.ok, dm: dm.ok } });
           return;
         } else {
@@ -464,7 +468,8 @@ const Dashboard = ({ overview }) => {
       try {
         const r2 = await tryJson(`/data/${month}.json`, 'static');
         if (r2.ok) {
-          if (alive) { setMonthOverview(r2.json?.overview || r2.json || null); setLoading(false); }
+          setMonthOverview(r2.json?.overview || r2.json || null);
+          setLoading(false);
           record({ source: 'static (/public/data)', status: r2.status, json: true });
           return;
         } else {
@@ -472,7 +477,8 @@ const Dashboard = ({ overview }) => {
         }
       } catch (e) { record({ source: 'static (/public/data)', error: String(e) }); }
 
-      if (alive) { setMonthOverview(null); setLoading(false); }
+      setMonthOverview(null);
+      setLoading(false);
     })();
 
     return () => { alive = false; };
@@ -563,7 +569,6 @@ const Dashboard = ({ overview }) => {
 
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
-  // NEW: how much of the occupancy target has been achieved (ring shows this)
   const occTargetAchievedPct = OCC_TARGET > 0
     ? Math.round(100 * clamp01(occToDatePct / OCC_TARGET))
     : 0;
@@ -619,6 +624,24 @@ const Dashboard = ({ overview }) => {
     );
   };
 
+  /* ------- centered target label for ReferenceLine ------- */
+  const CenteredTargetLabel = ({ viewBox, value }) => {
+    if (!viewBox) return null;
+    const { x, width, y } = viewBox;      // viewBox of the line within chart
+    const cx = x + width / 2;              // center of plotting area
+    return (
+      <text
+        x={cx}
+        y={y - 6}
+        textAnchor="middle"
+        dominantBaseline="central"
+        style={{ fontSize: 12, fontWeight: 600, fill: '#000' }}
+      >
+        {`Target ${currency(value)}`}
+      </text>
+    );
+  };
+
   /* ------------------------------ views ------------------------------ */
 
   const OverviewView = () => {
@@ -648,7 +671,6 @@ const Dashboard = ({ overview }) => {
             subtitle={`vs ${pct(OCC_TARGET)} target`}
             icon={Users}
             chip={mtdChip}
-            // NEW: ring now shows % of the occupancy target achieved (not the raw occupancy)
             rightSlot={<ProgressRing percent={occTargetAchievedPct} target={100} label="occupancy vs target" />}
             tooltip="Ring shows % of occupancy target achieved (weighted; cutoff yesterday 23:59)."
           />
@@ -677,7 +699,8 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             {ov.dailyData?.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
+                <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 32, left: 8 }}>
+                  {/* Title perfectly centered */}
                   <text
                     x="50%"
                     y={18}
@@ -692,18 +715,8 @@ const Dashboard = ({ overview }) => {
                   <XAxis dataKey="day" />
                   <YAxis tick={Y_TICK_SMALL} domain={[0, chartMaxY]} />
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Legend content={renderLegend} />
 
-                  {dailyTargetLevel > 0 && (
-                    <ReferenceLine
-                      y={dailyTargetLevel}
-                      stroke="#000"
-                      strokeWidth={2}
-                      strokeDasharray="3 3"
-                      label={{ value: `Target ${currency(dailyTargetLevel)}`, position: 'top', fill: '#000', fontSize: 12 }}
-                    />
-                  )}
-
+                  {/* Bars first... */}
                   <Bar dataKey="revenue" name="Actual Revenue">
                     {ov.dailyData.map((d, i) => {
                       const rev = num(d.revenue);
@@ -713,6 +726,26 @@ const Dashboard = ({ overview }) => {
                       return <Cell key={`rev-${i}`} fill={met ? '#10B981' : '#EF4444'} />;
                     })}
                   </Bar>
+
+                  {/* ...then target line so it renders ON TOP of bars */}
+                  {dailyTargetLevel > 0 && (
+                    <ReferenceLine
+                      y={dailyTargetLevel}
+                      stroke="#000"
+                      strokeWidth={2}
+                      strokeDasharray="3 3"
+                      ifOverflow="extendDomain"
+                      label={<CenteredTargetLabel value={dailyTargetLevel} />}
+                    />
+                  )}
+
+                  {/* Centered legend key at the bottom */}
+                  <Legend
+                    verticalAlign="bottom"
+                    align="center"
+                    wrapperStyle={{ textAlign: 'center' }}
+                    content={renderLegend}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -1002,7 +1035,7 @@ const Dashboard = ({ overview }) => {
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Updated</p>
                 <p className="text-sm font-medium text-gray-900">{lastUpdatedStr || '—'}</p>
-                {/* Source line is hidden from users; only visible when URL has ?inspect=1 */}
+                {/* Hidden unless ?inspect=1 */}
                 {showSourceLine && sourceInfo && (
                   <p className="text-[11px] text-gray-500 mt-1">
                     Source: {sourceInfo.source || '—'} {sourceInfo.status ? `(HTTP ${sourceInfo.status})` : ''}
