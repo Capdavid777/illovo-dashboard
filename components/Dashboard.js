@@ -312,9 +312,10 @@ function computeOccToDatePct(dailyRows, cutoff = new Date(), fallbackRoomsPerDay
 }
 
 /* ------------------------------ Progress Ring ------------------------------ */
-
+// Label shows true % (can exceed 100); arc visually caps at 100%.
 function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
-  const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  const pRaw = Number(percent) || 0;                          // actual percentage (may exceed 100)
+  const p = Math.max(0, Math.min(100, pRaw));                 // arc clamp 0–100
   const t = Math.max(0, Math.min(100, Number(target) || 0));
 
   const radius = (size - stroke) / 2;
@@ -323,9 +324,9 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
 
   const angle = (t / 100) * 2 * Math.PI - Math.PI / 2;
   const cx = size / 2 + radius * Math.cos(angle);
-  const cy = size / 2 * 1 + radius * Math.sin(angle);
+  const cy = size / 2 + radius * Math.sin(angle);
 
-  const met = p >= t;
+  const met = pRaw >= t;
   const progColor = met ? '#10B981' : '#EF4444';
 
   return (
@@ -338,7 +339,7 @@ function ProgressRing({ percent, target, size = 60, stroke = 8, label }) {
       />
       <circle cx={cx} cy={cy} r={3.2} fill="#000" />
       <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="12" fontWeight="600" fill="#111">
-        {Math.round(p)}%
+        {Math.round(pRaw)}%
       </text>
     </svg>
   );
@@ -503,10 +504,9 @@ const Dashboard = ({ overview }) => {
         const lastDay = ov.dailyData.reduce((a, r) => Math.max(a, num(r.day, 0)), 0);
         if (lastDay > 0) {
           const [y, m] = month.split('-').map(n => parseInt(n, 10));
-          best = new Date(y, (m || 1) - 1, lastDay, 23, 59, 0);
+          d = new Date(y, (m || 1) - 1, lastDay, 23, 59, 0);
         }
       }
-      d = best;
     }
     if (!d) d = new Date();
 
@@ -565,8 +565,9 @@ const Dashboard = ({ overview }) => {
 
   const occToDatePct = useMemo(() => computeOccToDatePct(ov.dailyData, cutoffDate), [ov.dailyData, cutoffDate]);
 
+  // FIX: allow >100% in label (ring arc still capped visually in ProgressRing)
   const occTargetAchievedPct = OCC_TARGET > 0
-    ? Math.round(100 * clamp01(occToDatePct / OCC_TARGET))
+    ? Math.round(100 * (occToDatePct / OCC_TARGET))
     : 0;
 
   const elapsedDays = mtdRows.length;
@@ -586,22 +587,7 @@ const Dashboard = ({ overview }) => {
     return 0;
   }, [ov.dailyData, ov.targetToDate, totalDays, monthOverview]);
 
-  /* ------------------------------ legends & tooltips ------------------------------ */
-
-  // Legend perfectly centered to the inner plot area (accounts for margins)
-  const AlignedLegend = (props) => {
-    const left = props?.margin?.left || 0;
-    const right = props?.margin?.right || 0;
-    const plotWidth = (props.chartWidth || 0) - left - right;
-    return (
-      <div style={{ width: plotWidth, marginLeft: left, display: 'flex', justifyContent: 'center', marginTop: 8, fontSize: 14 }}>
-        <div className="flex items-center gap-2">
-          <span style={{ width: 12, height: 12, display: 'inline-block', borderRadius: 2, background: 'linear-gradient(90deg, #EF4444 50%, #10B981 50%)', border: '1px solid rgba(0,0,0,0.25)' }} />
-          <span>Actual Revenue</span>
-        </div>
-      </div>
-    );
-  };
+  /* ------------------------------ tooltip ------------------------------ */
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null;
@@ -623,25 +609,6 @@ const Dashboard = ({ overview }) => {
           <span className="font-medium" style={{ color: revColor }}>{currency(rev)}</span>
         </div>
       </div>
-    );
-  };
-
-  /* ------- centered target label for ReferenceLine (raised) ------- */
-  const CenteredTargetLabel = ({ viewBox, value }) => {
-    if (!viewBox) return null;
-    const { x, width, y } = viewBox;      // inner-plot coords
-    const cx = x + width / 2;
-    const yOffset = 14;                    // raise label higher above the line
-    return (
-      <text
-        x={cx}
-        y={y - yOffset}
-        textAnchor="middle"
-        dominantBaseline="central"
-        style={{ fontSize: 12, fontWeight: 600, fill: '#000' }}
-      >
-        {`Target ${currency(value)}`}
-      </text>
     );
   };
 
@@ -702,8 +669,8 @@ const Dashboard = ({ overview }) => {
           <div className="h-80">
             {ov.dailyData?.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={ov.dailyData} margin={{ top: 40, right: 16, bottom: 32, left: 8 }}>
-                  {/* Title centered (close to plot center) */}
+                <BarChart data={ov.dailyData} margin={{ top: 48, right: 16, bottom: 24, left: 8 }}>
+                  {/* Title */}
                   <text
                     x="50%"
                     y={18}
@@ -713,6 +680,18 @@ const Dashboard = ({ overview }) => {
                   >
                     Daily Revenue vs Target
                   </text>
+                  {/* Target text directly under title */}
+                  {dailyTargetLevel > 0 && (
+                    <text
+                      x="50%"
+                      y={36}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      style={{ fontSize: 12, fontWeight: 600, fill: '#000', pointerEvents: 'none' }}
+                    >
+                      {`Target ${currency(dailyTargetLevel)}`}
+                    </text>
+                  )}
 
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="day" />
@@ -730,7 +709,7 @@ const Dashboard = ({ overview }) => {
                     })}
                   </Bar>
 
-                  {/* ...then target line so it renders ON TOP of bars */}
+                  {/* ...then target line so it renders ON TOP of bars (no label here) */}
                   {dailyTargetLevel > 0 && (
                     <ReferenceLine
                       y={dailyTargetLevel}
@@ -738,16 +717,10 @@ const Dashboard = ({ overview }) => {
                       strokeWidth={2}
                       strokeDasharray="3 3"
                       ifOverflow="extendDomain"
-                      label={<CenteredTargetLabel value={dailyTargetLevel} />}
                     />
                   )}
 
-                  {/* Legend centered to plot area */}
-                  <Legend
-                    verticalAlign="bottom"
-                    align="center"
-                    content={(props) => <AlignedLegend {...props} />}
-                  />
+                  {/* Legend removed on this chart */}
                 </BarChart>
               </ResponsiveContainer>
             ) : (
