@@ -376,6 +376,31 @@ const MetricCard = ({ title, value, subtitle, icon: Icon, chip, rightSlot, toolt
   </div>
 );
 
+/* ------------------------------ Chart help dropdown ------------------------------ */
+
+const ChartHelpDropdown = ({ description }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+      >
+        <Info className="w-3.5 h-3.5 text-gray-500" />
+        <span>How to read this chart</span>
+        <span className="text-[9px] text-gray-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 text-[11px] text-gray-700 shadow-lg">
+          {description}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ------------------------------ component ------------------------------ */
 
 const Dashboard = ({ overview }) => {
@@ -830,19 +855,15 @@ const Dashboard = ({ overview }) => {
           </div>
 
           <div className="bg-white p-6 rounded-lg shadow-lg">
-            <h3 className="sr-only">Occupancy vs ADR</h3>
+            <div className="flex items-start justify-between mb-2">
+              <h3 className="text-sm font-semibold text-gray-800">Occupancy vs ADR</h3>
+              <ChartHelpDropdown
+                description="Each room type has two bars: the green bar shows its occupancy percentage for the period, and the blue bar shows its average daily rate (ADR) in Rand. Use this to see which room types combine strong occupancy with higher rates."
+              />
+            </div>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={roomTypeData} margin={{ top: 40, right: 16, bottom: 8, left: 8 }}>
-                  <text
-                    x="50%" y={18}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    style={{ fontSize: 16, fontWeight: 700, fill: '#111', pointerEvents: 'none' }}
-                  >
-                    Occupancy vs ADR
-                  </text>
-
+                <BarChart data={roomTypeData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
                   <YAxis tick={Y_TICK_SMALL} />
