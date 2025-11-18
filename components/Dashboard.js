@@ -771,8 +771,20 @@ const Dashboard = ({ overview }) => {
     const revenue   = num(rt.revenue, 0);
     const rate      = num(rt.rate ?? rt.arr ?? rt.adr, 0);
     const occFromCalc = (available && sold !== null) ? (sold / available) * 100 : null;
-    const occ = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
-    return { type: rt.type || 'Unknown', available: available ?? 0, sold: sold ?? 0, revenue, rate, occupancy: occ };
+    const occ       = asPercent(rt.occupancy ?? occFromCalc ?? 0, 0);
+    const occupancy = occ;
+    const OCC_SCALE = 10; // 65% -> 650 (for better comparison with ADR bars)
+    const occupancyScaled = occupancy * OCC_SCALE;
+
+    return {
+      type: rt.type || 'Unknown',
+      available: available ?? 0,
+      sold: sold ?? 0,
+      revenue,
+      rate,
+      occupancy,
+      occupancyScaled,
+    };
   });
 
   const rtTotalRevenue   = roomTypeData.reduce((a, r) => a + num(r.revenue), 0);
@@ -797,6 +809,8 @@ const Dashboard = ({ overview }) => {
     }, [roomTypeData, sortBy]);
 
     useEffect(() => { if (asc) sorted.reverse(); }, [asc, sorted]);
+
+    const OCC_SCALE = 10;
 
     return (
       <div className="space-y-8">
@@ -867,13 +881,22 @@ const Dashboard = ({ overview }) => {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="type" />
                   <YAxis tick={Y_TICK_SMALL} />
-                  <RechartsTooltip formatter={(value, name) => {
-                    if (name === 'occupancy') return [`${Math.round(value)}%`, 'Occupancy'];
-                    if (name === 'rate') return [currency(value), 'ADR'];
-                    return [value, name];
-                  }} />
+                  <RechartsTooltip
+                    formatter={(value, name, props) => {
+                      if (props && props.dataKey === 'occupancyScaled') {
+                        const OCC_SCALE = 10;
+                        const pctVal = value / OCC_SCALE;
+                        return [`${Math.round(pctVal)}%`, 'Occupancy'];
+                      }
+                      if (props && props.dataKey === 'rate') {
+                        return [currency(value), 'ADR'];
+                      }
+                      return [value, name];
+                    }}
+                  />
                   <Legend />
-                  <Bar dataKey="occupancy" fill="#10B981" name="Occupancy (%)" />
+                  {/* Use scaled occupancy for bar height, but still label as Occupancy (%) */}
+                  <Bar dataKey="occupancyScaled" fill="#10B981" name="Occupancy (%)" />
                   <Bar dataKey="rate" fill="#3B82F6" name="ADR (R)" />
                 </BarChart>
               </ResponsiveContainer>
