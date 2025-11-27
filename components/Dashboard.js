@@ -599,8 +599,14 @@ const Dashboard = ({ overview }) => {
   const totalDays = daysInMonth(month);
   const mtdChip = `${elapsedDays}/${totalDays} days`;
 
-  const revenueProgressPct = ov.targetToDate > 0 ? Math.round(100 * clamp01(ov.revenueToDate / ov.targetToDate)) : 0;
-  const rateProgressPct    = ARR_BREAKEVEN > 0 ? Math.round(100 * clamp01(averageRoomRateFinal / ARR_BREAKEVEN)) : 0;
+  // Allow revenue and ARR progress to exceed 100% (no upper clamp; still lower-bounded at 0)
+  const revenueProgressPct = ov.targetToDate > 0
+    ? Math.round(100 * Math.max(0, ov.revenueToDate / ov.targetToDate))
+    : 0;
+
+  const rateProgressPct = ARR_BREAKEVEN > 0
+    ? Math.round(100 * Math.max(0, averageRoomRateFinal / ARR_BREAKEVEN))
+    : 0;
 
   /* ---------- Target line (supports top-level targets.daily_revenue_target) ---------- */
   const dailyTargetLevel = useMemo(() => {
